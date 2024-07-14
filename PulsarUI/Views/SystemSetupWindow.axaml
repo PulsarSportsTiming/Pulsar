@@ -199,9 +199,44 @@
                     <DataGridTextColumn Header="Pref. Tree"/>
                 </DataGrid.Columns>
             </DataGrid>
-        </TabItem>
-        <TabItem Header="Miscellaneous">
-            <Rectangle Width="300" Height="200" Fill="Black"/>
+        </TabItem><TabItem Header="Miscellaneous">
+            <StackPanel Orientation="Vertical">
+                <Label Content="Event"/>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="New"/>
+                    <Button Content="Load"/>
+                </StackPanel>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <Label Content="Units"/>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <RadioButton GroupName="Units" Content="Metric (Distances in metres, speeds in km/h" Padding="5"/>
+                <RadioButton GroupName="Units" Content="Imperial (Distances in feet and fractions of a mile, speeds in mph)" Padding="5"/>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <Label Content="Language"/>
+                <ComboBox>
+                    <ComboBoxItem Content="English"/>
+                    <ComboBoxItem Content="Cymraeg"/>
+                    <ComboBoxItem Content="Deutsch"/>
+                    <ComboBoxItem Content="Malti"/>
+                    <ComboBoxItem Content="Italiano"/>
+                    <ComboBoxItem Content="Svenska"/>
+                    <ComboBoxItem Content="Norsk"/>
+                    <ComboBoxItem Content="Suomi"/>
+                    <ComboBoxItem Content="Dansk"/>
+                    <ComboBoxItem Content="Français"/>
+                    <ComboBoxItem Content="Nederlands"/>
+                    <ComboBoxItem Content="Polski"/>
+                    <ComboBoxItem Content="Magyar"/>
+                    <ComboBoxItem Content="Čeština"/>
+                </ComboBox>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <Label Content="Theme"/>
+                <RadioButton GroupName="Theme" Content="Dark"/>
+                <RadioButton GroupName="Theme" Content="Light"/>
+                <RadioButton GroupName="Theme" Content="Pride"/>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+            </StackPanel>
         </TabItem>
     </TabControl>
 </Window>

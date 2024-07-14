@@ -15,7 +15,6 @@
         <StyleInclude Source="/Controls/SysStatusLabel.axaml"/>
         <StyleInclude Source="/Controls/CompetitorInfo.axaml"/>
         <StyleInclude Source="/Controls/EnterPairControl.axaml"/>
-        <StyleInclude Source="/Controls/FunctionButton.axaml"/>
         <StyleInclude Source="/Controls/TitleBar.axaml"/>
         <StyleInclude Source="/Controls/RunSetupLabel.axaml"/>
         <StyleInclude Source="/Controls/CategoryButton.axaml"/>
