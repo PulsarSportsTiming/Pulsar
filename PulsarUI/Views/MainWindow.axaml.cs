@@ -1,14 +1,11 @@
 using System;
-using System.Diagnostics;
-using System.Net.Mime;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Microsoft.CodeAnalysis;
 using System.Text.RegularExpressions;
 using PulsarUI.Models;
-using System.Text.RegularExpressions;
 using System.Text;
 
 namespace PulsarUI.Views;
@@ -24,6 +21,10 @@ public partial class MainWindow : Window
 
     }
 
+    // Use GeneratedRegexAttribute for compile-time regex generation
+    [GeneratedRegex(@"^(\d{0,2}(\.\d{0,2})?|\.?\d{0,2})?$")]
+    private static partial Regex IndexPatternRegex();
+    
     private void FunctionButton1_Clicked(object? sender, RoutedEventArgs e)
     {
         SystemSetupWindow systemSetupWindow = new SystemSetupWindow();
@@ -93,23 +94,195 @@ public partial class MainWindow : Window
         F12Button.Classes.Add(!SwiftSetEnterPairTitle.IsVisible ? "FKey" : "F12Highlight");
     }
 
+    private void EnterPairLeftNum_OnFocus(object? sender, GotFocusEventArgs e)
+    {
+        LeftRaceNumBox.SelectAll();
+    }
+    
     private void EnterPairLeftNum_OnKeyDown(object? sender, KeyEventArgs e)
     {
+        var currText = ((TextBox)sender!).Text == null ? "" : ((TextBox)sender).Text!.ToUpper();
+        
         if (e.Key == Key.Enter)
         {
-            string value = ((TextBox)sender).Text;
-            PairModel.WriteQueueRaceNum(0,0,value);
+            if (currText.All(char.IsAsciiLetterOrDigit)) //Catch-all in case of pasting
+            {
+                currText = "";
+            }
+            ((TextBox)sender).Text = currText;
+            PairModel.WriteQueueRaceNum(0,0,currText);
             
             LeftIndexBox.Focus();
         }
+        else if (e.KeySymbol != null && Char.IsAsciiLetterOrDigit(e.KeySymbol[0]))
+        {
+            var newText = ((TextBox)sender).Text + e.KeySymbol.ToUpper();
+            
+            ((TextBox)sender).Text = newText;
+            ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
+            switch (newText.Length)
+            {
+                case 16:
+                    ((TextBox)sender).SelectAll();
+                    break;
+                case > 16:
+                    ((TextBox)sender).Text = e.KeySymbol;
+                    ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
+                    break;
+            }
+            e.Handled = true;
+        }
+        else
+        {
+            e.Handled = true;
+        }
+    }
+    
+    private void EnterPairLeftIndex_OnFocus(object? sender, GotFocusEventArgs e)
+    {
+        LeftIndexBox.SelectAll();
+    }
+    
+    private void EnterPairLeftIndex_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && ((TextBox)sender!).Text != null)
+        {
+            //Final catch-all check. If good, pad, otherwise remove string
+            ((TextBox)sender).Text =
+                IsIndexAllowed(((TextBox)sender).Text!) ? PadIndex(((TextBox)sender).Text!) : "00.00"; //To do: replace 00.00 with personal/class/category index
+
+            RightRaceNumBox.Focus();
+        }
+        else if (e.KeySymbol != null)
+        {
+            ProcessIndexKeyDown(sender, e);
+        }
     }
 
-    private void EnterPairLeftIndex_OnKeyUp(object? sender, KeyEventArgs e)
+    private void EnterPairRightNum_OnFocus(object? sender, GotFocusEventArgs e)
     {
-        TextBox tb = (TextBox)sender;
-        int caretIndex = tb.CaretIndex;
-        string originalText = tb.Text;
+        RightRaceNumBox.SelectAll();
+    }
 
+    private void EnterPairRightNum_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        var currText = ((TextBox)sender!).Text == null ? "" : ((TextBox)sender).Text!.ToUpper();
+        
+        if (e.Key == Key.Enter)
+        {
+            if (currText.All(char.IsAsciiLetterOrDigit)) //Catch-all in case of pasting
+            {
+                currText = "";
+            }
+            ((TextBox)sender).Text = currText;
+            PairModel.WriteQueueRaceNum(0,0,currText);
+            
+            RightIndexBox.Focus();
+        }
+        else if (e.KeySymbol != null && char.IsAsciiLetterOrDigit(e.KeySymbol[0]))
+        {
+            var newText = ((TextBox)sender).Text + e.KeySymbol.ToUpper();
+            
+            ((TextBox)sender).Text = newText;
+            ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
+            if (newText.Length == 16)
+            {
+                ((TextBox)sender).SelectAll();
+            }
+            else if (newText.Length > 16)
+            {
+                ((TextBox)sender).Text = e.KeySymbol;
+                ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
+            }
+            e.Handled = true;
+        }
+        else
+        {
+            e.Handled = true;
+        }
+    }
+    
+    private void EnterPairRightIndex_OnFocus(object? sender, GotFocusEventArgs e)
+    {
+        RightIndexBox.SelectAll();
+    }
+    
+    private void EnterPairRightIndex_OnKeyDown(object? sender, KeyEventArgs e)
+    { 
+        if (e.Key == Key.Enter)
+        {
+            //Final catch-all check. If good, pad, otherwise zero index
+
+            ((TextBox)sender!).Text =
+                IsIndexAllowed(((TextBox)sender).Text!) ? PadIndex(((TextBox)sender).Text!) : "00.00";
+
+            LeftRaceNumBox.Focus();
+        }
+        else if (e.KeySymbol != null)
+        {
+            ProcessIndexKeyDown(sender, e);
+        }
+    }
+
+    private static void ProcessIndexKeyDown(object? sender, KeyEventArgs e)
+    {
+        var enteredChar = e.KeySymbol!;
+        var oldText = ((TextBox)sender!).Text == null ? "" : ((TextBox)sender).Text!.ToUpper();
+        var newText = enteredChar;
+        var iCarat = ((TextBox)sender).CaretIndex;
+
+        if (oldText == "" && ((TextBox)sender).SelectedText != oldText) //Insert the new character at the carat position
+        {
+            var preCaratText = iCarat > 0 ? oldText[..iCarat] : string.Empty;
+            var postCaratText = iCarat < oldText.Length ? oldText[iCarat..] : string.Empty;
+            newText = preCaratText + enteredChar + postCaratText;
+        }
+
+        if (!IsIndexAllowed(newText))
+        {
+            e.Handled = true;
+            return;
+        }
+        //If a user has typed two digits, automatically fill in the decimal point if one does not exist
+        else if (newText.Length == 2 && !newText.EndsWith('.') && !newText.Contains('.'))
+        {
+            newText += ".";
+            ((TextBox)sender).Text = newText;
+            ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
+            e.Handled = true;
+        }
+
+        // Handle when the index is not complete
+        if (newText.Length - newText.IndexOf('.', StringComparison.Ordinal) != 3)
+        {
+            // Handle cases where the index is not complete here if needed
+            return;
+        }
+
+        // The index is deemed to be complete when there are two digits after the decimal point.
+        // Select all to allow the user to begin over-typing
+        ((TextBox)sender).Text = PadIndex(newText);
+        ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
+        ((TextBox)sender).SelectAll();
+        e.Handled = true;
+
+    }
+    
+    private void EnterPairIndex_OnKeyUp(object? sender, KeyEventArgs e)
+    {
+        var tb = (TextBox)sender!;
+        var caretIndex = tb.CaretIndex;
+        string originalText;
+
+        if (tb.Text != null)
+        {
+            originalText = tb.Text;
+        }
+        else
+        {
+            return;
+        }
+        
         if (e.Key == Key.Back)
         {
             // Handle Backspace
@@ -118,32 +291,35 @@ public partial class MainWindow : Window
                 HandleBackspace(tb, caretIndex, originalText);
             }
         }
-        else if (e.Key == Key.Delete && caretIndex < tb.Text.Length)
+        else if (e.Key == Key.Delete && caretIndex < tb.Text!.Length)
         {
             HandleDelete(tb, caretIndex, originalText);
         }
     }
-    
-    private void HandleBackspace(TextBox tb, int caretIndex, string originalText)
+
+    private static void HandleBackspace(TextBox tb, int caretIndex, string originalText)
     {
         // Simulate the removal of the character before the caret
-        string newText = originalText.Remove(caretIndex - 1, 1);
+        var newText = originalText.Remove(caretIndex - 1, 1);
 
         // Validate newText after deleting the character
-        if (!IsIndexAllowed(newText))
+        if (IsIndexAllowed(newText))
         {
-            // Re-insert the period if necessary
-            newText = ReinsertPeriod(newText, caretIndex - 1);
+            tb.Text = newText;
+            tb.CaretIndex = caretIndex;
+            return; // Exit early
         }
 
+        // Handle the case where the text is not allowed
+        newText = ReinsertPeriod(newText, caretIndex - 1);
         tb.Text = newText;
         tb.CaretIndex = caretIndex - 1; // Move caret back
     }
 
-    private void HandleDelete(TextBox tb, int caretIndex, string originalText)
+    private static void HandleDelete(TextBox tb, int caretIndex, string originalText)
     {
         // Simulate the removal of the character after the caret
-        string newText = originalText.Remove(caretIndex, 1);
+        var newText = originalText.Remove(caretIndex, 1);
 
         // Validate newText after deleting the character
         if (!IsIndexAllowed(newText))
@@ -155,195 +331,42 @@ public partial class MainWindow : Window
         tb.Text = newText;
         tb.CaretIndex = caretIndex; // Keep caret position
     }
-
-    private void EnterPairRightIndex_OnKeyUp(object? sender, KeyEventArgs e)
-    {
-        TextBox tb = (TextBox)sender;
-        int caretIndex = tb.CaretIndex;
-        string originalText = tb.Text;
-
-        if (e.Key == Key.Back)
-        {
-            // Handle Backspace
-            if (caretIndex > 0)
-            {
-                HandleBackspace(tb, caretIndex, originalText);
-            }
-        }
-        else if (e.Key == Key.Delete || caretIndex < tb.Text.Length)
-        {
-            HandleDelete(tb, caretIndex, originalText);
-        }
-    }
     
-    private string ReinsertPeriod(string text, int caretIndex)
+    private static string ReinsertPeriod(string text, int caretIndex)
     {
         // Insert period if necessary at caretIndex
-        if (caretIndex > 0 && caretIndex <= text.Length && !text.Contains("."))
+        if (caretIndex > 0 && caretIndex <= text.Length && !text.Contains('.'))
         {
             text = text.Insert(caretIndex, ".");
         }
         return text;
     }
-    private void EnterPairLeftIndex_OnKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            //Final catch-all check. If good, pad, otherwise remove string
-            if (IsIndexAllowed(((TextBox)sender).Text))
-            {
-                ((TextBox)sender).Text = PadIndex(((TextBox)sender).Text);
-            }
-            else
-            {
-                ((TextBox)sender).Text = "00.00";//This should eventually be the class index or category index (in that order)
-            }
-
-            RightRaceNumBox.Focus();
-        }
-        else if (e.KeySymbol != null)
-        {
-            string enteredChar = e.KeySymbol;
-            string oldText = ((TextBox)sender).Text;
-            string newText = "";
-            int iCarat = ((TextBox)sender).CaretIndex;
-
-            if (oldText == null || ((TextBox)sender).SelectedText == oldText) //If the string was empty, no processing needed
-            {
-                newText = enteredChar;
-            }
-            else //Insert the new character at the carat position
-            {
-                string preCaratText = iCarat > 0 ? oldText.Substring(0, iCarat) : string.Empty;
-                string postCaratText = iCarat < oldText.Length ? oldText.Substring(iCarat) : string.Empty;
-                newText = preCaratText + enteredChar + postCaratText;
-            }
-
-            if (!IsIndexAllowed(newText))
-            {
-                e.Handled = true;
-            }
-            //If a user has typed two digits, automatically fill in the decimal point if one does not exist
-            else if (newText.Length == 2 && !newText.EndsWith('.') && !newText.Contains("."))
-            {
-                newText += ".";
-                ((TextBox)sender).Text = newText;
-                ((TextBox)sender).CaretIndex = ((TextBox)sender).Text.Length;
-                e.Handled = true;
-            }
-
-            //The index is deemed to be complete when there are two digits after the decimal point.
-            //Select all to allow the user to begin overtyping
-            if (newText.Length - newText.IndexOf(".") == 3)
-            {
-                ((TextBox)sender).Text = PadIndex(newText);
-                ((TextBox)sender).CaretIndex = ((TextBox)sender).Text.Length;
-                ((TextBox)sender).SelectAll();
-                e.Handled = true;
-            }
-        }
-    }
-
-    private void EnterPairRightNum_OnKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            string value = ((TextBox)sender).Text;
-            PairModel.WriteQueueRaceNum(0,1,value);
-            
-            RightIndexBox.Focus();
-        }
-    }
     
-    private void EnterPairRightIndex_OnKeyDown(object? sender, KeyEventArgs e)
-    { 
-        if (e.Key == Key.Enter)
-        {
-            //Final catch-all check. If good, pad, otherwise remove string
-            if (IsIndexAllowed(((TextBox)sender).Text))
-            {
-                ((TextBox)sender).Text = PadIndex(((TextBox)sender).Text);
-            }
-            else
-            {
-                ((TextBox)sender).Text = "00.00";//This should eventually be the class index or category index (in that order)
-            }
-
-            LeftRaceNumBox.Focus();
-        }
-        else if (e.KeySymbol != null)
-        {
-            string enteredChar = e.KeySymbol;
-            string oldText = ((TextBox)sender).Text;
-            string newText = "";
-            int iCarat = ((TextBox)sender).CaretIndex;
-
-            if (oldText == null || ((TextBox)sender).SelectedText == oldText) //If the string was empty, no processing needed
-            {
-                newText = enteredChar;
-            }
-            else //Insert the new character at the carat position
-            {
-                string preCaratText = iCarat > 0 ? oldText.Substring(0, iCarat) : string.Empty;
-                string postCaratText = iCarat < oldText.Length ? oldText.Substring(iCarat) : string.Empty;
-                newText = preCaratText + enteredChar + postCaratText;
-            }
-
-            if (!IsIndexAllowed(newText))
-            {
-                e.Handled = true;
-            }
-            //If a user has typed two digits, automatically fill in the decimal point if one does not exist
-            else if (newText.Length == 2 && !newText.EndsWith('.') && !newText.Contains("."))
-            {
-                newText += ".";
-                ((TextBox)sender).Text = newText;
-                ((TextBox)sender).CaretIndex = ((TextBox)sender).Text.Length;
-                e.Handled = true;
-            }
-
-            //The index is deemed to be complete when there are two digits after the decimal point.
-            //Select all to allow the user to begin overtyping
-            if (newText.Length - newText.IndexOf(".") == 3)
-            {
-                ((TextBox)sender).Text = PadIndex(newText);
-                ((TextBox)sender).CaretIndex = ((TextBox)sender).Text.Length;
-                ((TextBox)sender).SelectAll();
-                e.Handled = true;
-            }
-        }
-    }
     private static bool IsIndexAllowed(string text)
     {
         //The following patterns are valid: 0, 00, 00.0, 00.00, 0,00, 0.0, 0., 00., ., .00, .0 
         //Only numbers and decimal points allowed. No more than 2 digits before or after the decimal point, only one decimal point
         //Need to implement locale feature to account for commas as decimal points
-        if (text == null)
+        if (text == "")
         {
             return false;
         }
-        string pattern = @"^(\d{1,2}(\.\d{0,2})?|\.?\d{0,2})$";
-        Regex regex = new Regex(pattern);
+
+        var regex = IndexPatternRegex();
         return regex.IsMatch(text);
     }
 
-    private string PadIndex(string currIndex)
+    private static string PadIndex(string currIndex)
     {
-        string newIndex = currIndex;
-        StringBuilder bld;
+        var newIndex = currIndex;
 
-        if (newIndex == null)
-        {
-            newIndex = "00.00";
-        }
-        
         if (!newIndex.Contains("."))
         {
             newIndex += ".";
         }
 
-        bld = new StringBuilder(newIndex);
-        while (bld.ToString().IndexOf(".") < 2)
+        var bld = new StringBuilder(newIndex);
+        while (bld.ToString().IndexOf(".", StringComparison.Ordinal) < 2)
         {
             bld.Insert(0, "0");
         }
@@ -359,26 +382,6 @@ public partial class MainWindow : Window
         newIndex = bld.ToString();
 
         return newIndex;
-    }
-
-    private void EnterPairLeftNum_OnFocus(object? sender, GotFocusEventArgs e)
-    {
-        LeftRaceNumBox.SelectAll();
-    }
-
-    private void EnterPairLeftIndex_OnFocus(object? sender, GotFocusEventArgs e)
-    {
-        LeftIndexBox.SelectAll();
-    }
-    
-    private void EnterPairRightNum_OnFocus(object? sender, GotFocusEventArgs e)
-    {
-        RightRaceNumBox.SelectAll();
-    }
-
-    private void EnterPairRightIndex_OnFocus(object? sender, GotFocusEventArgs e)
-    {
-        RightIndexBox.SelectAll();
     }
 }
 

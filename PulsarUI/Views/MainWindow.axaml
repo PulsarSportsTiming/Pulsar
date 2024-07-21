@@ -257,10 +257,10 @@
                     </Style>
                 </Grid.Styles>
                 <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #" VerticalContentAlignment="Center" />
-                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="LeftRaceNumBox" Text="123" KeyDown="EnterPairLeftNum_OnKeyDown" GotFocus="EnterPairLeftNum_OnFocus" TabIndex="0"/>
+                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="LeftRaceNumBox" Text="" MaxLength="16" KeyDown="EnterPairLeftNum_OnKeyDown" GotFocus="EnterPairLeftNum_OnFocus" TabIndex="0"/>
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0" VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="LeftIndexBox" Watermark="00.00"
-                         KeyDown="EnterPairLeftIndex_OnKeyDown" KeyUp="EnterPairLeftIndex_OnKeyUp" GotFocus="EnterPairLeftIndex_OnFocus" TabIndex="1"/>
+                         KeyDown="EnterPairLeftIndex_OnKeyDown" KeyUp="EnterPairIndex_OnKeyUp" GotFocus="EnterPairLeftIndex_OnFocus" TabIndex="1"/>
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
                     <Label Classes="StandardLabel" Content="SP/ET" />
@@ -316,11 +316,11 @@
                     </Style>
                 </Grid.Styles>
                 <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #" VerticalContentAlignment="Center" />
-                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="RightRaceNumBox" Text="123"
+                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="RightRaceNumBox" Text="" MaxLength="16"
                          KeyDown="EnterPairRightNum_OnKeyDown" GotFocus="EnterPairRightNum_OnFocus" TabIndex="3"/>
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0" VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="RightIndexBox" Watermark="00.00"
-                         KeyDown="EnterPairRightIndex_OnKeyDown" KeyUp="EnterPairRightIndex_OnKeyUp" GotFocus="EnterPairRightIndex_OnFocus" TabIndex="4"/>
+                         KeyDown="EnterPairRightIndex_OnKeyDown" KeyUp="EnterPairIndex_OnKeyUp" GotFocus="EnterPairRightIndex_OnFocus" TabIndex="4"/>
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
                     <Label Classes="StandardLabel" Content="SP/ET" />
