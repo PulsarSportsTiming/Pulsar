@@ -15,53 +15,53 @@
              to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
         <vm:MainWindowViewModel />
     </Design.DataContext>
-    
+
     <Window.Styles>
         <Style Selector="Button.FKey">
-            <Setter Property="VerticalContentAlignment" Value="Top"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="Width" Value="100"/>
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Width" Value="100" />
             <Setter Property="Transitions">
                 <Transitions>
-                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1"/>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" />
                 </Transitions>
             </Setter>
         </Style>
         <Style Selector="Button.F12Highlight">
-            <Setter Property="VerticalContentAlignment" Value="Top"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="Width" Value="100"/>
-            <Setter Property="Background" Value="ForestGreen"/>
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Width" Value="100" />
+            <Setter Property="Background" Value="ForestGreen" />
             <Setter Property="Transitions">
                 <Transitions>
-                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1"/>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" />
                 </Transitions>
             </Setter>
         </Style>
         <Style Selector="Button.F10Highlight">
-            <Setter Property="VerticalContentAlignment" Value="Top"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="Width" Value="100"/>
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Width" Value="100" />
             <Setter Property="Transitions">
                 <Transitions>
-                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1"></TransformOperationsTransition>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" />
                 </Transitions>
             </Setter>
-            <Setter Property="Background" Value="Blue"/>
+            <Setter Property="Background" Value="Blue" />
         </Style>
         <Style Selector="Label.FKeyText">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
         </Style>
         <Style Selector="StackPanel.FKeySP">
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="Orientation" Value="Vertical"/>
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="Orientation" Value="Vertical" />
         </Style>
     </Window.Styles>
-    
+
     <!-- Main Grid -->
     <!--<Viewbox Stretch="Uniform" StretchDirection="Both">-->
     <Grid ColumnDefinitions="2*,*,2*" RowDefinitions="2*,30*,2*,3*,3*,5*,4*" Margin="1">
@@ -73,7 +73,8 @@
         <Grid Grid.Row="1" Grid.Column="0" Margin="1,1,1,1" Background="{DynamicResource DetailBackground}"
               RowDefinitions="Auto,*,*,*,*,*,*,*,*,*,*,*,*,*,*">
             <controls:CompetitorInfo Grid.Column="0" Grid.Row="0"
-                                     CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET" CIName="Jon Webster" CIModel="Mustang" CIBackground="{DynamicResource TitleBackground}" />
+                                     CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET" CIName="Jon Webster"
+                                     CIModel="Mustang" CIBackground="{DynamicResource TitleBackground}" />
             <controls:TimingData Grid.Row="1" TimingLabel="Reaction Time" TimingValue="+3.0256" />
             <controls:TimingData Grid.Row="2" TimingLabel="18.288m ET" TimingValue="0.9108" />
             <controls:TimingData Grid.Row="3" TimingLabel="100.584m ET" TimingValue="2.3207" />
@@ -90,7 +91,8 @@
         </Grid>
 
         <!-- System status -->
-        <Grid Grid.Row="1" Grid.Column="1" Background="{DynamicResource TitleBackground}" RowDefinitions="*" Margin="0,1,0,1">
+        <Grid Grid.Row="1" Grid.Column="1" Background="{DynamicResource TitleBackground}" RowDefinitions="*"
+              Margin="0,1,0,1">
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto"
                   RowDefinitions="*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*">
 
@@ -153,23 +155,28 @@
                 <controls:SensorLabel Grid.Row="13" Grid.Column="1" Classes="Disabled"
                                       SensorLabelText="402.336m" />
                 <controls:SensorIcon Grid.Row="13" Grid.Column="2" Classes="ErrorInactive" />
-                
-                <controls:RunSetupLabel Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed" RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro"/>
-                <controls:RunSetupLabel Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left" Classes="StartMode" RSLStMode="Auto (7, 0.2)"></controls:RunSetupLabel>
-                <Grid Grid.Row="16" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="60,Auto,*" HorizontalAlignment="Left">
-                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Remote"/>
-                    <Label Grid.Column="1" Classes="StandardLabel" Content="—"/>
-                    <controls:SensorIcon Grid.Column="2" HorizontalAlignment="Left" Classes="OK"/>
+
+                <controls:RunSetupLabel Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed"
+                                        RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro" />
+                <controls:RunSetupLabel Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left"
+                                        Classes="StartMode" RSLStMode="Auto (7, 0.2)" />
+                <Grid Grid.Row="16" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="60,Auto,*"
+                      HorizontalAlignment="Left">
+                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Remote" />
+                    <Label Grid.Column="1" Classes="StandardLabel" Content="—" />
+                    <controls:SensorIcon Grid.Column="2" HorizontalAlignment="Left" Classes="OK" />
                 </Grid>
-                <controls:RunSetupLabel Grid.Row="17" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left" Classes="Finish" RSLFinish="402.336m"/>
-                <Grid Grid.Row="18" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="60,Auto,*" HorizontalAlignment="Left">
-                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Display"/>
-                    <Label Grid.Column="1" Classes="StandardLabel" Content="—"/>
+                <controls:RunSetupLabel Grid.Row="17" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left"
+                                        Classes="Finish" RSLFinish="402.336m" />
+                <Grid Grid.Row="18" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="60,Auto,*"
+                      HorizontalAlignment="Left">
+                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Display" />
+                    <Label Grid.Column="1" Classes="StandardLabel" Content="—" />
                     <StackPanel Grid.Column="2" Orientation="Horizontal">
-                        <Label Classes="StandardLabelDisabled" Content="In"/>
-                        <Label Classes="StandardLabel" Content="RT"/>
-                        <Label Classes="StandardLabel" Content="ET"/>
-                        <Label Classes="StandardLabel" Content="Sp"/>
+                        <Label Classes="StandardLabelDisabled" Content="In" />
+                        <Label Classes="StandardLabel" Content="RT" />
+                        <Label Classes="StandardLabel" Content="ET" />
+                        <Label Classes="StandardLabel" Content="Sp" />
                     </StackPanel>
                 </Grid>
             </Grid>
@@ -179,7 +186,8 @@
         <Grid Grid.Row="1" Grid.Column="2" Margin="1,1,1,1" Background="{DynamicResource DetailBackground}"
               RowDefinitions="Auto,*,*,*,*,*,*,*,*,*,*,*,*,*,*">
             <controls:CompetitorInfo Grid.Column="0" Grid.Row="0"
-                                     CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET" CIName="Jon Webster" CIModel="Mustang" CIBackground="{DynamicResource TitleBackground}" />
+                                     CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET" CIName="Jon Webster"
+                                     CIModel="Mustang" CIBackground="{DynamicResource TitleBackground}" />
             <controls:TimingData Grid.Row="1" TimingLabel="Reaction Time" TimingValue="+3.0256" />
             <controls:TimingData Grid.Row="2" TimingLabel="18.288m ET" TimingValue="0.9108" />
             <controls:TimingData Grid.Row="3" TimingLabel="100.584m ET" TimingValue="2.3207" />
@@ -202,26 +210,32 @@
         <!-- Queue Left -->
         <Grid Grid.Row="3" Grid.Column="0" Background="#303030" Margin="1">
             <controls:CompetitorInfo Grid.Column="0" Grid.Row="0" CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET"
-                                     CIName="Jon Webster" CIModel="Mustang" CIBackground="{DynamicResource DetailBackground}" />
+                                     CIName="Jon Webster" CIModel="Mustang"
+                                     CIBackground="{DynamicResource DetailBackground}" />
         </Grid>
 
         <!-- Queue pair settings -->
-        <Grid Grid.Row="3" Grid.Column="1" Background="{DynamicResource TitleBackground}" RowDefinitions="*" Margin="0,1,0,1">
+        <Grid Grid.Row="3" Grid.Column="1" Background="{DynamicResource TitleBackground}" RowDefinitions="*"
+              Margin="0,1,0,1">
             <Grid Grid.Row="0" ColumnDefinitions="60,*,Auto"
                   RowDefinitions="Auto,Auto">
-                <controls:RunSetupLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeSingle" RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro"/>
-                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Classes="Finish" RSLFinish="402.336m"/>
+                <controls:RunSetupLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeSingle"
+                                        RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro" />
+                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Classes="Finish"
+                                        RSLFinish="402.336m" />
             </Grid>
         </Grid>
 
         <!-- Queue Right -->
         <Grid Grid.Row="3" Grid.Column="2" Background="#303030" Margin="1">
             <controls:CompetitorInfo Grid.Column="0" Grid.Row="0" CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET"
-                                     CIName="Jon Webster" CIModel="Mustang" CIBackground="{DynamicResource DetailBackground}" />
+                                     CIName="Jon Webster" CIModel="Mustang"
+                                     CIBackground="{DynamicResource DetailBackground}" />
         </Grid>
 
         <!-- Enter Title -->
-        <Grid Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="100, *, 100" Background="{DynamicResource TitleBackground}" Margin="1,10,1,0">
+        <Grid Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="100, *, 100"
+              Background="{DynamicResource TitleBackground}" Margin="1,10,1,0">
             <Label Classes="StandardLabel" Grid.Column="0" Content="Enter Pair" />
             <!-- StandardEnterPairTitle is mutually exclusive with SwiftSetEnterPairTitle -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
@@ -234,17 +248,17 @@
                         HorizontalAlignment="Center" IsVisible="False" x:Name="SwiftSetEnterPairTitle">
                 <Label Classes="StandardLabelBold" Content="Category" />
                 <ComboBox Width="250">
-                    <ComboBoxItem Content="01 - Super Twin Top Gas"/>
-                    <ComboBoxItem Content="02 - Top Fuel"/>
+                    <ComboBoxItem Content="01 - Super Twin Top Gas" />
+                    <ComboBoxItem Content="02 - Top Fuel" />
                 </ComboBox>
                 <Label Classes="StandardLabelBold" Content="Mode" />
                 <ComboBox Width="120">
-                    <ComboBoxItem Content="Practice"/>
-                    <ComboBoxItem Content="Qualifying"/>
-                    <ComboBoxItem Content="Eliminations"/>
+                    <ComboBoxItem Content="Practice" />
+                    <ComboBoxItem Content="Qualifying" />
+                    <ComboBoxItem Content="Eliminations" />
                 </ComboBox>
                 <Label Classes="StandardLabelBold" Content="Round" />
-                <NumericUpDown Minimum="1" Value="1" FormatString="0" Width="110"/>
+                <NumericUpDown Minimum="1" Value="1" FormatString="0" Width="110" />
             </StackPanel>
         </Grid>
 
@@ -256,11 +270,16 @@
                         <Setter Property="Foreground" Value="#F0F0F0" />
                     </Style>
                 </Grid.Styles>
-                <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #" VerticalContentAlignment="Center" />
-                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="LeftRaceNumBox" Text="" MaxLength="16" KeyDown="EnterPairLeftNum_OnKeyDown" GotFocus="EnterPairLeftNum_OnFocus" TabIndex="0"/>
-                <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0" VerticalContentAlignment="Center" />
-                <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="LeftIndexBox" Watermark="00.00"
-                         KeyDown="EnterPairLeftIndex_OnKeyDown" KeyUp="EnterPairIndex_OnKeyUp" GotFocus="EnterPairLeftIndex_OnFocus" TabIndex="1"/>
+                <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #"
+                       VerticalContentAlignment="Center" />
+                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="LeftRaceNumBox"
+                         KeyDown="LeftRaceNumBox_OnKeyDown" MaxLength="16" AcceptsReturn="False" TabIndex="0"
+                          GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairRaceNum, Mode=TwoWay}"/>
+                <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
+                       VerticalContentAlignment="Center" />
+                <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="LeftIndexBox"
+                         Watermark="00.00" TabIndex="1" KeyDown="LeftIndexBox_OnKeyDown" KeyUp="LeftIndexBox_OnKeyUp"
+                          GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairIndex, Mode=TwoWay}"/>
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
                     <Label Classes="StandardLabel" Content="SP/ET" />
@@ -271,37 +290,43 @@
         </Grid>
 
         <!-- Enter pair settings -->
-        <Grid Grid.Row="5" Grid.Column="1" x:Name="StandardEnterPairConfig" Background="{DynamicResource TitleBackground}" RowDefinitions="*" Margin="0,1,0,1">
+        <Grid Grid.Row="5" Grid.Column="1" x:Name="StandardEnterPairConfig"
+              Background="{DynamicResource TitleBackground}" RowDefinitions="*" Margin="0,1,0,1">
             <Grid Grid.Row="0" ColumnDefinitions="60,*,*"
                   RowDefinitions="Auto,Auto">
-                <controls:RunSetupLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed" RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro"/>
-                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Classes="Finish" RSLFinish="402.336m"/>
+                <controls:RunSetupLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed"
+                                        RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro" />
+                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Classes="Finish"
+                                        RSLFinish="402.336m" />
             </Grid>
         </Grid>
-        <Grid Grid.Row="5" Grid.Column="1" x:Name="SwiftSetEnterPairConfig" IsVisible="False" Background="{DynamicResource TitleBackground}" RowDefinitions="*" Margin="0,1,0,1">
+        <Grid Grid.Row="5" Grid.Column="1" x:Name="SwiftSetEnterPairConfig" IsVisible="False"
+              Background="{DynamicResource TitleBackground}" RowDefinitions="*" Margin="0,1,0,1">
             <Grid Grid.Row="0" ColumnDefinitions="60,*,*"
                   RowDefinitions="Auto,Auto">
-                <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Center">
+                <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
+                            HorizontalAlignment="Center">
                     <ComboBox>
-                        <ComboBoxItem Content=".4 Pro"/>
-                        <ComboBoxItem Content=".5 Full"/>
-                        <ComboBoxItem Content="Delay"/>
-                        <ComboBoxItem Content=".5 Pro"/>
+                        <ComboBoxItem Content=".4 Pro" />
+                        <ComboBoxItem Content=".5 Full" />
+                        <ComboBoxItem Content="Delay" />
+                        <ComboBoxItem Content=".5 Pro" />
                     </ComboBox>
                     <Label Classes="StandardLabel" Content="— Tree — " />
                     <ComboBox>
-                        <ComboBoxItem Content=".4 Pro"/>
-                        <ComboBoxItem Content=".5 Full"/>
-                        <ComboBoxItem Content="Delay"/>
-                        <ComboBoxItem Content=".5 Pro"/>
+                        <ComboBoxItem Content=".4 Pro" />
+                        <ComboBoxItem Content=".5 Full" />
+                        <ComboBoxItem Content="Delay" />
+                        <ComboBoxItem Content=".5 Pro" />
                     </ComboBox>
                 </StackPanel>
-                <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Center">
+                <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
+                            HorizontalAlignment="Center">
                     <Label Classes="StandardLabel" Content="Finish — " />
                     <ComboBox>
-                        <ComboBoxItem Content="402.336m"/>
-                        <ComboBoxItem Content="304.800m"/>
-                        <ComboBoxItem Content="201.165"/>
+                        <ComboBoxItem Content="402.336m" />
+                        <ComboBoxItem Content="304.800m" />
+                        <ComboBoxItem Content="201.165" />
                     </ComboBox>
                 </StackPanel>
             </Grid>
@@ -315,12 +340,16 @@
                         <Setter Property="Foreground" Value="#F0F0F0" />
                     </Style>
                 </Grid.Styles>
-                <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #" VerticalContentAlignment="Center" />
-                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="RightRaceNumBox" Text="" MaxLength="16"
-                         KeyDown="EnterPairRightNum_OnKeyDown" GotFocus="EnterPairRightNum_OnFocus" TabIndex="3"/>
-                <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0" VerticalContentAlignment="Center" />
-                <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="RightIndexBox" Watermark="00.00"
-                         KeyDown="EnterPairRightIndex_OnKeyDown" KeyUp="EnterPairIndex_OnKeyUp" GotFocus="EnterPairRightIndex_OnFocus" TabIndex="4"/>
+                <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #"
+                       VerticalContentAlignment="Center" />
+                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="RightRaceNumBox" MaxLength="16"
+                         TabIndex="3" KeyDown="RightRaceNumBox_OnKeyDown" KeyUp="RightRaceNumBox_OnKeyUp"
+                          GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding RightEnterPairRaceNum, Mode=TwoWay}"/>
+                <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
+                       VerticalContentAlignment="Center" />
+                <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="RightIndexBox"
+                         Watermark="00.00" TabIndex="4" KeyDown="RightIndexBox_OnKeyDown"
+                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding RightEnterPairIndex, Mode=TwoWay}"/>
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
                     <Label Classes="StandardLabel" Content="SP/ET" />
@@ -333,76 +362,76 @@
         <!-- Button Bar -->
         <Grid Grid.Column="0" Grid.Row="6" Grid.ColumnSpan="3" ColumnDefinitions="*,*,*,*,*,*,*,*,*,*,*,*"
               Background="#3B3B3B" Margin="1,10,1,1">
-            <Button Grid.Column="0" x:Name="F1Button" Classes="FKey" HotKey="F1" Click="FunctionButton1_Clicked">
+            <Button Grid.Column="0" x:Name="F1Button" Classes="FKey" HotKey="F1">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F1" />
                     <Label Classes="FKeyText" Content="System" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="1" x:Name="F2Button" Classes="FKey" HotKey="F2" Click="FunctionButton2_Clicked">
+            <Button Grid.Column="1" x:Name="F2Button" Classes="FKey" HotKey="F2">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F2" />
                     <Label Classes="FKeyText" Content="Re-run" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="2" x:Name="F3Button" Classes="FKey" HotKey="F3" Click="FunctionButton3_Clicked">
+            <Button Grid.Column="2" x:Name="F3Button" Classes="FKey" HotKey="F3">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F3" />
                     <Label Classes="FKeyText" Content="Reset" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="3" x:Name="F4Button" Classes="FKey" HotKey="F4" Click="FunctionButton4_Clicked">
+            <Button Grid.Column="3" x:Name="F4Button" Classes="FKey" HotKey="F4">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F4" />
                     <Label Classes="FKeyText" Content="Swap" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="4" x:Name="F5Button" Classes="FKey" HotKey="F5" Click="FunctionButton5_Clicked">
+            <Button Grid.Column="4" x:Name="F5Button" Classes="FKey" HotKey="F5">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F5" />
                     <Label Classes="FKeyText" Content="Queue" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="5" x:Name="F6Button" Classes="FKey" HotKey="F6" Click="FunctionButton6_Clicked">
+            <Button Grid.Column="5" x:Name="F6Button" Classes="FKey" HotKey="F6">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F6" />
                     <Label Classes="FKeyText" Content="Start" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="6" x:Name="F7Button" Classes="FKey" HotKey="F7" Click="FunctionButton7_Clicked">
+            <Button Grid.Column="6" x:Name="F7Button" Classes="FKey" HotKey="F7">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F7" />
                     <Label Classes="FKeyText" Content="Setup" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="7" x:Name="F8Button" Classes="FKey" HotKey="F8" Click="FunctionButton8_Clicked">
+            <Button Grid.Column="7" x:Name="F8Button" Classes="FKey" HotKey="F8">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F8" />
                     <Label Classes="FKeyText" Content="Abort" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="8" x:Name="F9Button" Classes="FKey" HotKey="F9" Click="FunctionButton9_Clicked">
+            <Button Grid.Column="8" x:Name="F9Button" Classes="FKey" HotKey="F9">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F9" />
                     <Label Classes="FKeyText" Content="Swap" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="9" x:Name="F10Button" Classes="FKey" HotKey="F10" Click="FunctionButton10_Clicked">
+            <Button Grid.Column="9" x:Name="F10Button" Classes="FKey" HotKey="F10">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F10" />
                     <Label Classes="FKeyText" Content="ENGAGE" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="10" x:Name="F11Button" Classes="FKey" HotKey="F11" Click="FunctionButton11_Clicked">
+            <Button Grid.Column="10" x:Name="F11Button" Classes="FKey" HotKey="F11">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F11" />
                     <Label Classes="FKeyText" Content="Clear Queue" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="11" x:Name="F12Button" Classes="FKey" HotKey="Ctrl+F12" Click="FunctionButton12_Clicked">
+            <Button Grid.Column="11" x:Name="F12Button" Classes="FKey" HotKey="Ctrl+F12">
                 <StackPanel Classes="FKeySP">
-                    <Label Classes="FKeyText" Content="F12"/>
-                    <Label Classes="FKeyText" Content="SwiftSet"/>
+                    <Label Classes="FKeyText" Content="F12" />
+                    <Label Classes="FKeyText" Content="SwiftSet" />
                 </StackPanel>
             </Button>
         </Grid>

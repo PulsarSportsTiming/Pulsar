@@ -1,22 +1,57 @@
-﻿using Avalonia;
+﻿using System;
+using Avalonia;
 using Avalonia.ReactiveUI;
-using System;
+using Microsoft.Extensions.DependencyInjection;
+using PulsarUI.Interfaces;
+using PulsarUI.Services;
+using PulsarUI.ViewModels;
+using PulsarUI.Views;
 
 namespace PulsarUI;
 
 public static class Program
 {
-    // Initialization code. Don't use any Avalonia, third-party APIs or any
-    // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
-    // yet and stuff might break.
     [STAThread]
-    public static void Main(string[] args) => BuildAvaloniaApp()
-        .StartWithClassicDesktopLifetime(args);
+    public static void Main(string[] args)
+    {
+        // Set up Dependency Injection and pass it into Avalonia
+        BuildAvaloniaApp()
+            .StartWithClassicDesktopLifetime(args);
+    }
 
-    // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<App>()
+    {
+        var builder = AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .LogToTrace()
             .UseReactiveUI();
+
+        // Skip dependency injection in design mode
+        if (Avalonia.Controls.Design.IsDesignMode)
+        {
+            return builder;
+        }
+        
+        var services = new ServiceCollection();
+        
+        // Register services and view models here
+        services.AddSingleton<IDatabaseService>(provider => new DatabaseService("Data Source=/home/david/PulsarDB.db"));
+        services.AddSingleton<MainWindowViewModel>(); // Add the ViewModel to DI container
+        services.AddSingleton<MainWindow>();
+        
+        // Build the ServiceProvider
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Now configure Avalonia app to use DI
+        return AppBuilder.Configure<App>()
+            .UsePlatformDetect()
+            .LogToTrace()
+            .UseReactiveUI()
+            .AfterSetup(_ =>
+            {
+                // Set the ServiceProvider for Avalonia
+                var app = (App)Application.Current;
+                app.ServiceProvider = serviceProvider;
+            });
+    }
 }

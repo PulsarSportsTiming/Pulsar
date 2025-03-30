@@ -24,7 +24,9 @@
         <PackageReference Condition="'$(Configuration)' == 'Debug'" Include="Avalonia.Diagnostics" Version="11.0.9" />
         <PackageReference Include="Avalonia.ReactiveUI" Version="11.0.9" />
         <PackageReference Include="Avalonia.Themes.Fluent" Version="11.0.9" />
+        <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
         <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0-preview.3.24172.4" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.3" />
         <PackageReference Include="SQLite" Version="3.13.0" />
         <PackageReference Include="System.Data.SQLite" Version="1.0.118" />
     </ItemGroup>
@@ -40,10 +42,6 @@
       </Compile>
       <Compile Update="Controls\RunSetupLabel.axaml.cs">
         <DependentUpon>RunSetupLabel.axaml</DependentUpon>
-        <SubType>Code</SubType>
-      </Compile>
-      <Compile Update="Controls\SensorIcon.axaml.cs">
-        <DependentUpon>SensorIcon.axaml</DependentUpon>
         <SubType>Code</SubType>
       </Compile>
       <Compile Update="Controls\SensorLabel.axaml.cs">
