@@ -6,5 +6,8 @@ namespace PulsarUI.Interfaces
     public interface IDatabaseService
     {
         Task WriteQueueAsync(RaceEntry entry);
+        Task<IndexList> GetIndexListAsync(RaceEntry entry);
+        
+        Task<RacerDetails> GetRacerDetailsAsync(RaceEntry entry);
     }
 }

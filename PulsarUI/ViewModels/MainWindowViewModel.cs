@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Input;
@@ -15,22 +16,36 @@ namespace PulsarUI.ViewModels
     public partial class MainWindowViewModel : ViewModelBase
     {
         private readonly IDatabaseService _databaseService;
-        
+
         [GeneratedRegex(@"^(\d{0,2}(\.\d{0,2})?|\.?\d{0,2})?$")]
     
         private static partial Regex IndexPatternRegex();
 
+        [ObservableProperty] private int _enterPairCategIndex;
+        [ObservableProperty] private string _enterPairCategName;
+        [ObservableProperty] private int _enterPairFinishIndex;
+        [ObservableProperty] private string _enterPairFinishName;
         [ObservableProperty] private string _leftEnterPairRaceNum;
         [ObservableProperty] private string _rightEnterPairRaceNum;
         [ObservableProperty] private string _leftEnterPairIndex;
         [ObservableProperty] private string _rightEnterPairIndex;
+        [ObservableProperty] private string _leftEnterPairClass;
+        [ObservableProperty] private string _rightEnterPairClass;
+        [ObservableProperty] private string _leftEnterPairName;
+        [ObservableProperty] private string _rightEnterPairName;
+        [ObservableProperty] private string _leftEnterPairVehicle;
+        [ObservableProperty] private string _rightEnterPairVehicle;
 
         public MainWindowViewModel()
         {
             _databaseService = new DatabaseService("Data Source=/home/david/PulsarDB.db");
+            EnterPairCategIndex = 1;
+            EnterPairCategName = "Sportsman ET";
+            EnterPairFinishIndex = 1;
+            EnterPairFinishName = "402.336m";
         }
 
-       public void EnterPairRaceNum_OnKeyDown(object? sender, KeyEventArgs e)
+       public async Task EnterPairRaceNum_OnKeyDown(object? sender, KeyEventArgs e)
         {
             if (sender is not TextBox textBox) { return; }
             
@@ -48,22 +63,26 @@ namespace PulsarUI.ViewModels
                     textBox.Text = currText;
                 }
 
-                var vehicleIndex = GetVehIndex(0, currText);
-
-                var raceEntry = new RaceEntry();
-                raceEntry.QueueIndex = 0;
-                if (textBox.Name == "LeftRaceNumBox")
+                var raceEntry = new RaceEntry
                 {
-                    raceEntry.Lane = 0;
-                }
-                else if (textBox.Name == "RightRaceNumBox")
+                    QueueIndex = 0
+                };
+                switch (textBox.Name)
                 {
-                    raceEntry.Lane = 1;
+                    case "LeftRaceNumBox":
+                        raceEntry.Lane = 0;
+                        LeftEnterPairRaceNum = currText;
+                        break;
+                    case "RightRaceNumBox":
+                        raceEntry.Lane = 1;
+                        RightEnterPairRaceNum = currText;
+                        break;
                 }
                 raceEntry.RaceNumber = currText;
-                raceEntry.HandicapIndex = vehicleIndex;
+                raceEntry.HandicapIndex = await GetVehIndexAsync(raceEntry.Lane);
                 raceEntry.Tree = 0; //This needs implementing properly
-                _databaseService.WriteQueueAsync(raceEntry);
+                await _databaseService.WriteQueueAsync(raceEntry);
+                await GetEntryDetailsAsync(raceEntry.Lane);
             }
             else if (e.KeySymbol != null && char.IsAsciiLetterOrDigit(e.KeySymbol[0]))
             {
@@ -75,18 +94,71 @@ namespace PulsarUI.ViewModels
             }
         }
 
-        private string GetVehIndex(int category, string currText)
+        private async Task<string> GetVehIndexAsync(int lane)
         {
-            return "00.00"; //Replace with logic to get index
-            //Priority:
-            //Personal Index
-            //Event Index
-            //Class Index
-            //Category default Index
-            //00.00
-            //Also handling for Stock/Superstock eliminations (same class, same index, no overwrite allowed)
-            //Also consider locking out index box controls for categories that are heads up or Super Comp/Gas/Street...
-            //...Comp Eliminator qualifying (and possibly once CIC is implemented), or some mechanism to warn the user
+            var entry = new RaceEntry
+            {
+                Category = EnterPairCategIndex,
+                Finish = EnterPairFinishIndex,
+                RaceNumber = lane switch
+                {
+                    0 => LeftEnterPairRaceNum,
+                    1 => RightEnterPairRaceNum,
+                    _ => null
+                }
+            };
+
+            var indexList = await _databaseService.GetIndexListAsync(entry);
+
+            var indexes = new[]
+            {
+                indexList.EventIndex,
+                indexList.PersonalIndex,
+                indexList.ClassIndex,
+                indexList.CategoryIndex
+            };
+
+            switch (lane)
+            {
+                case 0:
+                    LeftEnterPairIndex = indexes.FirstOrDefault(index => index != "") ?? "00.00";
+                    break;
+                case 1:
+                    RightEnterPairIndex = indexes.FirstOrDefault(index => index != "") ?? "00.00";
+                    break;
+            }
+
+            return indexes.FirstOrDefault(index => index != "") ?? "00.00";
+        }
+        
+        private async Task GetEntryDetailsAsync(int lane)
+        {
+            var entry = new RaceEntry();
+
+            entry.Category = EnterPairCategIndex;
+
+            entry.RaceNumber = lane switch
+            {
+                0 => LeftEnterPairRaceNum,
+                1 => RightEnterPairRaceNum,
+                _ => entry.RaceNumber
+            };
+            
+            var racerDetails = await _databaseService.GetRacerDetailsAsync(entry);
+
+            switch (lane)
+            {
+                case 0:
+                    LeftEnterPairClass = racerDetails.Class;
+                    LeftEnterPairName = racerDetails.Name;
+                    LeftEnterPairVehicle = racerDetails.Vehicle;
+                    break;
+                case 1:
+                    RightEnterPairClass = racerDetails.Class;
+                    RightEnterPairName = racerDetails.Name;
+                    RightEnterPairVehicle = racerDetails.Vehicle;
+                    break;
+            }
         }
 
         private static void ProcessRaceNumKeyDown(object? sender, KeyEventArgs e)

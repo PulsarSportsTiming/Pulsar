@@ -240,7 +240,7 @@
             <!-- StandardEnterPairTitle is mutually exclusive with SwiftSetEnterPairTitle -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                         HorizontalAlignment="Center" IsVisible="True" x:Name="StandardEnterPairTitle">
-                <Label Classes="StandardLabelBold" Content="Super Twin Top Gas" />
+                <Label Classes="StandardLabelBold" Name="EnterPairCategNameLabel" Content="{Binding EnterPairCategName, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="—" />
                 <Label Classes="StandardLabelBold" Content="Practice Round 1" />
             </StackPanel>
@@ -274,17 +274,17 @@
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="LeftRaceNumBox"
                          KeyDown="LeftRaceNumBox_OnKeyDown" MaxLength="16" AcceptsReturn="False" TabIndex="0"
-                          GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairRaceNum, Mode=TwoWay}"/>
+                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairRaceNum, Mode=TwoWay}" />
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="LeftIndexBox"
                          Watermark="00.00" TabIndex="1" KeyDown="LeftIndexBox_OnKeyDown" KeyUp="LeftIndexBox_OnKeyUp"
-                          GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairIndex, Mode=TwoWay}"/>
+                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairIndex, Mode=TwoWay}" />
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
-                    <Label Classes="StandardLabel" Content="SP/ET" />
-                    <Label Classes="StandardLabel" Content="Filipos Papafilipou" />
-                    <Label Classes="StandardLabel" Content="Mustang" />
+                    <Label Classes="StandardLabel" Name="LeftEnterPairClassLabel" Content="{Binding LeftEnterPairClass, Mode=OneWay}" />
+                    <Label Classes="StandardLabel" Name="LeftEnterPairNameLabel" Content="{Binding LeftEnterPairName, Mode=OneWay}"  />
+                    <Label Classes="StandardLabel" Name="LeftEnterPairVehicleLabel" Content="{Binding LeftEnterPairVehicle, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
         </Grid>
@@ -296,8 +296,8 @@
                   RowDefinitions="Auto,Auto">
                 <controls:RunSetupLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed"
                                         RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro" />
-                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Classes="Finish"
-                                        RSLFinish="402.336m" />
+                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Name="EnterPairFinishLabel" Classes="Finish"
+                                        RSLFinish="{Binding EnterPairFinishName, Mode=OneWay}" />
             </Grid>
         </Grid>
         <Grid Grid.Row="5" Grid.Column="1" x:Name="SwiftSetEnterPairConfig" IsVisible="False"
@@ -344,17 +344,17 @@
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="RightRaceNumBox" MaxLength="16"
                          TabIndex="3" KeyDown="RightRaceNumBox_OnKeyDown" KeyUp="RightRaceNumBox_OnKeyUp"
-                          GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding RightEnterPairRaceNum, Mode=TwoWay}"/>
+                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding RightEnterPairRaceNum, Mode=TwoWay}" />
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="RightIndexBox"
                          Watermark="00.00" TabIndex="4" KeyDown="RightIndexBox_OnKeyDown"
-                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding RightEnterPairIndex, Mode=TwoWay}"/>
+                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding RightEnterPairIndex, Mode=TwoWay}" />
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
-                    <Label Classes="StandardLabel" Content="SP/ET" />
-                    <Label Classes="StandardLabel" Content="Talethaeia Ransköppingsburg" />
-                    <Label Classes="StandardLabel" Content="Koenigsegg Jesko" />
+                    <Label Classes="StandardLabel" Name="RightEnterPairClassLabel" Content="{Binding RightEnterPairClass, Mode=OneWay}" />
+                    <Label Classes="StandardLabel" Name="RightEnterPairNameLabel" Content="{Binding RightEnterPairName, Mode=OneWay}"  />
+                    <Label Classes="StandardLabel" Name="RightEnterPairVehicleLabel" Content="{Binding RightEnterPairVehicle, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
         </Grid>
