@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -21,84 +22,135 @@ namespace PulsarUI.ViewModels
     
         private static partial Regex IndexPatternRegex();
 
-        [ObservableProperty] private int _enterPairCategIndex;
-        [ObservableProperty] private string _enterPairCategName;
+        // Category Properties
+        [ObservableProperty] private Category? _enterPairCateg;
+        [ObservableProperty] private string? _enterPairSelectedCategText;
+        [ObservableProperty] private int _enterPairSelectedCategIndex;
+        [ObservableProperty] private List<string>? _categComboBoxItems;
+        [ObservableProperty] private List<Category?>? _categories;
+        
+        // Race Mode Properties
+        [ObservableProperty] private List<string> _enterPairModeComboBoxItems;
+        [ObservableProperty] private int _enterPairSelectedModeIndex;
+        [ObservableProperty] private string? _enterPairSelectedModeName;
+        
+        // Round Number Properties
+        [ObservableProperty] private int _enterPairRound;
+        
+        // Tree Type Properties
+        [ObservableProperty] private List<string> _enterPairTreeComboBoxItems;
+        [ObservableProperty] private int _enterPairLeftSelectedTreeIndex;
+        [ObservableProperty] private string? _enterPairLeftSelectedTreeName;
+        [ObservableProperty] private int _enterPairRightSelectedTreeIndex;
+        [ObservableProperty] private string? _enterPairRightSelectedTreeName;
+        
+        // Finish Line Properties
+        [ObservableProperty] private List<string> _enterPairFinishComboBoxItems;
         [ObservableProperty] private int _enterPairFinishIndex;
         [ObservableProperty] private string _enterPairFinishName;
-        [ObservableProperty] private string _leftEnterPairRaceNum;
-        [ObservableProperty] private string _rightEnterPairRaceNum;
-        [ObservableProperty] private string _leftEnterPairIndex;
-        [ObservableProperty] private string _rightEnterPairIndex;
-        [ObservableProperty] private string _leftEnterPairClass;
-        [ObservableProperty] private string _rightEnterPairClass;
-        [ObservableProperty] private string _leftEnterPairName;
-        [ObservableProperty] private string _rightEnterPairName;
-        [ObservableProperty] private string _leftEnterPairVehicle;
-        [ObservableProperty] private string _rightEnterPairVehicle;
+        [ObservableProperty] private int _enterPairSelectedFinishIndex;
+        [ObservableProperty] private string? _enterPairSelectedFinishName;
+        
+        // Race Number Properties
+        [ObservableProperty] private string? _leftEnterPairRaceNum;
+        [ObservableProperty] private string? _rightEnterPairRaceNum;
+        
+        // Index/Dial-in Properties
+        [ObservableProperty] private string? _leftEnterPairIndex;
+        [ObservableProperty] private string? _rightEnterPairIndex;
+        
+        // Racer Info Properties
+        [ObservableProperty] private string? _leftEnterPairClass;
+        [ObservableProperty] private string? _rightEnterPairClass;
+        [ObservableProperty] private string? _leftEnterPairName;
+        [ObservableProperty] private string? _rightEnterPairName;
+        [ObservableProperty] private string? _leftEnterPairVehicle;
+        [ObservableProperty] private string? _rightEnterPairVehicle;
 
         public MainWindowViewModel()
         {
             _databaseService = new DatabaseService("Data Source=/home/david/PulsarDB.db");
-            EnterPairCategIndex = 1;
-            EnterPairCategName = "Sportsman ET";
-            EnterPairFinishIndex = 1;
-            EnterPairFinishName = "402.336m";
+            _ = LoadFinishLinesAsync();
+            _ = LoadTreeTypesAsync();
+            _ = LoadCategoriesAsync();
+            EnterPairSelectedCategIndex = 0;
+            EnterPairModeComboBoxItems =
+            [
+                "Practice",
+                "Demonstration",
+                "Qualifying",
+                "Eliminations",
+                "Q+E Combo"
+            ];
+            EnterPairSelectedModeIndex = 0;
+            EnterPairRound = 1;
+        }
+        partial void OnEnterPairSelectedCategTextChanged(string? value)
+        {
+            if (Categories != null)
+                EnterPairCateg =
+                    Categories.FirstOrDefault(c => value != null && c != null && c.CategoryIndex == int.Parse(value[..2]));
+
+            if (CategComboBoxItems != null && EnterPairCateg is { CategoryTreeType: not null })
+                EnterPairLeftSelectedTreeIndex = EnterPairRightSelectedTreeIndex =
+                    EnterPairTreeComboBoxItems.IndexOf(EnterPairCateg.CategoryTreeType);
+
+            if (EnterPairCateg != null && EnterPairCateg.CategoryFinish != null)
+                EnterPairSelectedFinishIndex = EnterPairFinishComboBoxItems.IndexOf(EnterPairCateg.CategoryFinish);
         }
 
-       public async Task EnterPairRaceNum_OnKeyDown(object? sender, KeyEventArgs e)
+        private async Task LoadCategoriesAsync()
         {
-            if (sender is not TextBox textBox) { return; }
+            Categories = await _databaseService.GetCategoryListAsync();
             
-            var currText = textBox.Text == null ? "" : textBox.Text.ToUpper();
+            var formattedItems = Categories.Select(c => $"{(c.CategoryIndex.ToString("D2"))} - {c.CategoryName}").ToList();
+            
+            CategComboBoxItems = formattedItems;
+        }
 
-            if (e.Key == Key.Enter)
-            {
-                if (!currText.All(char.IsAsciiLetterOrDigit)) // Catch-all in case of pasting
-                {
-                    currText = "";
-                }
+        private async Task LoadTreeTypesAsync()
+        {
+            var treeTypes = await _databaseService.GetTreeTypesAsync();
+            
+            EnterPairTreeComboBoxItems = treeTypes;
+        }
 
-                if (textBox.Text != currText)
-                {
-                    textBox.Text = currText;
-                }
-
-                var raceEntry = new RaceEntry
-                {
-                    QueueIndex = 0
-                };
-                switch (textBox.Name)
-                {
-                    case "LeftRaceNumBox":
-                        raceEntry.Lane = 0;
-                        LeftEnterPairRaceNum = currText;
-                        break;
-                    case "RightRaceNumBox":
-                        raceEntry.Lane = 1;
-                        RightEnterPairRaceNum = currText;
-                        break;
-                }
-                raceEntry.RaceNumber = currText;
-                raceEntry.HandicapIndex = await GetVehIndexAsync(raceEntry.Lane);
-                raceEntry.Tree = 0; //This needs implementing properly
-                await _databaseService.WriteQueueAsync(raceEntry);
-                await GetEntryDetailsAsync(raceEntry.Lane);
-            }
-            else if (e.KeySymbol != null && char.IsAsciiLetterOrDigit(e.KeySymbol[0]))
+        private async Task LoadFinishLinesAsync()
+        {
+            var finishLines = await _databaseService.GetFinishLinesAsync();
+            
+            EnterPairFinishComboBoxItems = finishLines;
+        }
+       
+        public async Task EnterPairRaceNumProcess(int lane)
+        {
+            var raceEntry = new RaceEntry
             {
-                ProcessRaceNumKeyDown(sender, e);
-            }
-            else
+                QueueIndex = 0,
+                Lane = lane,
+                Finish = EnterPairFinishIndex
+            };
+            switch (lane)
             {
-                e.Handled = true;
+                case 0:
+                    raceEntry.RaceNumber = LeftEnterPairRaceNum;
+                    raceEntry.Tree = EnterPairLeftSelectedTreeIndex;
+                    break;
+                case 1:
+                    raceEntry.RaceNumber = RightEnterPairRaceNum;
+                    raceEntry.Tree = EnterPairRightSelectedTreeIndex;
+                    break;
             }
+            raceEntry.HandicapIndex = await GetVehIndexAsync(raceEntry.Lane);
+            await _databaseService.WriteQueueAsync(raceEntry);
+            await GetEntryDetailsAsync(raceEntry.Lane);
         }
 
         private async Task<string> GetVehIndexAsync(int lane)
         {
             var entry = new RaceEntry
             {
-                Category = EnterPairCategIndex,
+                Category = EnterPairCateg.CategoryIndex,
                 Finish = EnterPairFinishIndex,
                 RaceNumber = lane switch
                 {
@@ -133,9 +185,10 @@ namespace PulsarUI.ViewModels
         
         private async Task GetEntryDetailsAsync(int lane)
         {
-            var entry = new RaceEntry();
-
-            entry.Category = EnterPairCategIndex;
+            var entry = new RaceEntry
+            {
+                Category = EnterPairCateg.CategoryIndex
+            };
 
             entry.RaceNumber = lane switch
             {
@@ -161,229 +214,28 @@ namespace PulsarUI.ViewModels
             }
         }
 
-        private static void ProcessRaceNumKeyDown(object? sender, KeyEventArgs e)
+        public async Task EnterPairIndexProcess(int lane)
         {
-            var enteredChar = e.KeySymbol!.ToUpper();
-            var oldText = ((TextBox)sender!).Text == null ? "" : ((TextBox)sender).Text!.ToUpper();
-            var iCarat = ((TextBox)sender).CaretIndex;
-            var newText = enteredChar;
-        
-            if (oldText.Length > 0 && oldText != ((TextBox)sender).SelectedText)
+            var raceEntry = new RaceEntry
             {
-                var preCaratText = iCarat > 0 ? oldText[..iCarat] : string.Empty;
-                var postCaratText = iCarat < oldText.Length ? oldText[iCarat..] : string.Empty;
-                newText = preCaratText + enteredChar + postCaratText;
-            }
-            
-            ((TextBox)sender).Text = newText;
-            ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
-            switch (newText.Length)
+                QueueIndex = 0,
+                Lane = lane,
+                Finish = EnterPairFinishIndex
+            };
+            switch (lane)
             {
-                case 16:
-                    ((TextBox)sender).SelectAll();
+                case 0:
+                    raceEntry.RaceNumber = LeftEnterPairRaceNum;
+                    raceEntry.HandicapIndex = LeftEnterPairIndex;
+                    raceEntry.Tree = EnterPairLeftSelectedTreeIndex;
                     break;
-                case > 16:
-                    ((TextBox)sender).Text = e.KeySymbol;
-                    ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
+                case 1:
+                    raceEntry.RaceNumber = RightEnterPairRaceNum;
+                    raceEntry.HandicapIndex = RightEnterPairIndex;
+                    raceEntry.Tree = EnterPairRightSelectedTreeIndex;
                     break;
             }
-            e.Handled = true;
-        }
-
-        public void EnterPairIndex_OnKeyDown(object? sender, KeyEventArgs e)
-        {
-            if (sender is not TextBox textBox) { return; }
-            
-            var currText = textBox.Text == null ? "" : textBox.Text.ToUpper();
-            
-            if (e.Key == Key.Enter)
-            {
-                currText = PadIndex(currText);
-                
-                if (textBox.Text != currText)
-                {
-                    textBox.Text = currText;
-                }
-
-                var raceEntry = new RaceEntry();
-                raceEntry.QueueIndex = 0;
-                switch (textBox.Name)
-                {
-                    case "LeftIndexBox":
-                        raceEntry.Lane = 0;
-                        raceEntry.RaceNumber = LeftEnterPairRaceNum;
-                        break;
-                    case "RightIndexBox":
-                        raceEntry.Lane = 1;
-                        raceEntry.RaceNumber = RightEnterPairRaceNum;
-                        break;
-                    default: break;
-                }
-                raceEntry.HandicapIndex = currText;
-                raceEntry.Tree = 0; //This needs implementing properly
-                _databaseService.WriteQueueAsync(raceEntry);
-            }
-            else if (e.KeySymbol != null)
-            {
-                ProcessIndexKeyDown(sender, e);
-            }
-        }
-        
-        public void EnterPairIndex_OnKeyUp(object? sender, KeyEventArgs e)
-        {
-            if (sender is not TextBox textBox) { return; }
-            
-            var currText = textBox.Text == null ? "" : textBox.Text.ToUpper();
-            var caretIndex = textBox.CaretIndex;
-        
-            if (e.Key == Key.Back)
-            {
-                // Handle Backspace
-                if (caretIndex > 0)
-                {
-                    HandleBackspace(textBox, caretIndex, currText);
-                }
-            }
-            else if (e.Key == Key.Delete && caretIndex < textBox.Text!.Length)
-            {
-                HandleDelete(textBox, caretIndex, currText);
-            }
-        }
-        
-        private static void HandleDelete(TextBox tb, int caretIndex, string originalText)
-        {
-            // Simulate the removal of the character after the caret
-            var newText = originalText.Remove(caretIndex, 1);
-
-            // Validate newText after deleting the character
-            if (!IsIndexAllowed(newText))
-            {
-                // Re-insert the period if necessary
-                newText = ReinsertPeriod(newText, caretIndex);
-            }
-
-            tb.Text = newText;
-            tb.CaretIndex = caretIndex; // Keep caret position
-        }
-        private static void HandleBackspace(TextBox tb, int caretIndex, string originalText)
-        {
-            if (IsIndexAllowed(originalText))
-            {
-                tb.Text = originalText;
-                tb.CaretIndex = caretIndex;
-                return; // Exit early
-            }
-            // Simulate the removal of the character before the caret
-            var newText = originalText.Remove(caretIndex - 1, 1);
-
-            // Validate newText after deleting the character
-            if (IsIndexAllowed(newText))
-            {
-                tb.Text = newText;
-                tb.CaretIndex = caretIndex;
-                return; // Exit early
-            }
-
-            // Handle the case where the text is not allowed
-            newText = ReinsertPeriod(newText, caretIndex - 1);
-            tb.Text = newText;
-            tb.CaretIndex = caretIndex - 1; // Move caret back
-        }
-        
-        private static string ReinsertPeriod(string text, int caretIndex)
-        {
-            // Insert period if necessary at caretIndex
-            if (caretIndex > 0 && caretIndex <= text.Length && !text.Contains('.'))
-            {
-                text = text.Insert(caretIndex, ".");
-            }
-            return text;
-        }
-        
-        private static void ProcessIndexKeyDown(object? sender, KeyEventArgs e)
-        {
-            var enteredChar = e.KeySymbol!;
-            var oldText = ((TextBox)sender!).Text == null ? "" : ((TextBox)sender).Text!.ToUpper();
-            var iCarat = ((TextBox)sender).CaretIndex;
-            var newText = enteredChar;
-        
-            if (oldText.Length > 0 && oldText != ((TextBox)sender).SelectedText)
-            {
-                var preCaratText = iCarat > 0 ? oldText[..iCarat] : string.Empty;
-                var postCaratText = iCarat < oldText.Length ? oldText[iCarat..] : string.Empty;
-                newText = preCaratText + enteredChar + postCaratText;
-            }
-        
-            if (!IsIndexAllowed(newText))
-            {
-                e.Handled = true;
-                return;
-            }
-            //If a user has typed two digits, automatically fill in the decimal point if one does not exist
-            else if (newText.Length == 2 && !newText.EndsWith('.') && !newText.Contains('.'))
-            {
-                newText += ".";
-                ((TextBox)sender).Text = newText;
-                ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
-                e.Handled = true;
-            }
-
-            // Handle when the index is not complete
-            if (newText.Length - newText.IndexOf('.', StringComparison.Ordinal) != 3)
-            {
-                // Handle cases where the index is not complete here if needed
-                return;
-            }
-
-            // The index is deemed to be complete when there are two digits after the decimal point.
-            // Select all to allow the user to begin over-typing
-            ((TextBox)sender).Text = PadIndex(newText);
-            ((TextBox)sender).CaretIndex = ((TextBox)sender).Text!.Length;
-            ((TextBox)sender).SelectAll();
-            e.Handled = true;
-
-        }
-        
-        private static bool IsIndexAllowed(string text)
-        {
-            //The following patterns are valid: 0, 00, 00.0, 00.00, 0,00, 0.0, 0., 00., ., .00, .0 
-            //Only numbers and decimal points allowed. No more than 2 digits before or after the decimal point, only one decimal point
-            //Need to implement locale feature to account for commas as decimal points
-            if (text == "")
-            {
-                return false;
-            }
-
-            var regex = IndexPatternRegex();
-            return regex.IsMatch(text);
-        }
-        
-        private static string PadIndex(string currIndex)
-        {
-            var newIndex = currIndex;
-
-            if (!newIndex.Contains("."))
-            {
-                newIndex += ".";
-            }
-
-            var bld = new StringBuilder(newIndex);
-            while (bld.ToString().IndexOf(".", StringComparison.Ordinal) < 2)
-            {
-                bld.Insert(0, "0");
-            }
-
-            newIndex = bld.ToString();
-
-            bld = new StringBuilder(newIndex);
-            while (bld.Length < 5)
-            {
-                bld.Append("0");
-            }
-
-            newIndex = bld.ToString();
-
-            return newIndex;
+            await _databaseService.WriteQueueAsync(raceEntry);
         }
     }
     

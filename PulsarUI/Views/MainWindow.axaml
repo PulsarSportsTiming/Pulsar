@@ -240,25 +240,26 @@
             <!-- StandardEnterPairTitle is mutually exclusive with SwiftSetEnterPairTitle -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                         HorizontalAlignment="Center" IsVisible="True" x:Name="StandardEnterPairTitle">
-                <Label Classes="StandardLabelBold" Name="EnterPairCategNameLabel" Content="{Binding EnterPairCategName, Mode=OneWay}" />
+                <Label Classes="StandardLabelBold" Name="EnterPairCategNameLabel"
+                       Content="{Binding EnterPairCateg.CategoryName, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="—" />
-                <Label Classes="StandardLabelBold" Content="Practice Round 1" />
+                <Label Classes="StandardLabelBold" Content="{Binding EnterPairSelectedModeName, Mode=OneWay}"/>
+                <Label Classes="StandardLabelBold" Content="Round"/>
+                <Label Classes="StandardLabelBold" Content="{Binding EnterPairRound, Mode=OneWay}" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                         HorizontalAlignment="Center" IsVisible="False" x:Name="SwiftSetEnterPairTitle">
                 <Label Classes="StandardLabelBold" Content="Category" />
-                <ComboBox Width="250">
-                    <ComboBoxItem Content="01 - Super Twin Top Gas" />
-                    <ComboBoxItem Content="02 - Top Fuel" />
-                </ComboBox>
+                <ComboBox Width="250" SelectedIndex="{Binding EnterPairSelectedCategIndex, Mode=TwoWay}"
+                          SelectedItem="{Binding EnterPairSelectedCategText, Mode=TwoWay}"
+                          ItemsSource="{Binding CategComboBoxItems, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="Mode" />
-                <ComboBox Width="120">
-                    <ComboBoxItem Content="Practice" />
-                    <ComboBoxItem Content="Qualifying" />
-                    <ComboBoxItem Content="Eliminations" />
-                </ComboBox>
+                <ComboBox Width="120" SelectedIndex="{Binding EnterPairSelectedModeIndex}"
+                          SelectedItem="{Binding EnterPairSelectedModeName}"
+                          ItemsSource="{Binding EnterPairModeComboBoxItems, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="Round" />
-                <NumericUpDown Minimum="1" Value="1" FormatString="0" Width="110" />
+                <NumericUpDown Minimum="1" Maximum="99" Value="{Binding EnterPairRound, Mode=TwoWay}" FormatString="0"
+                               Width="110" />
             </StackPanel>
         </Grid>
 
@@ -273,18 +274,25 @@
                 <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #"
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="LeftRaceNumBox"
-                         KeyDown="LeftRaceNumBox_OnKeyDown" MaxLength="16" AcceptsReturn="False" TabIndex="0"
-                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairRaceNum, Mode=TwoWay}" />
+                         MaxLength="16" AcceptsReturn="False" TabIndex="0"
+                         Text="{Binding LeftEnterPairRaceNum, Mode=TwoWay}"
+                         KeyDown="RaceNumBox_OnKeyDown"
+                         GotFocus="EnterPairTextBox_OnGotFocus"
+                         TextChanged="RaceNumBox_OnTextChanged" />
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="LeftIndexBox"
-                         Watermark="00.00" TabIndex="1" KeyDown="LeftIndexBox_OnKeyDown" KeyUp="LeftIndexBox_OnKeyUp"
+                         Watermark="00.00" TabIndex="1"
+                         KeyDown="IndexBox_OnKeyDown"
                          GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairIndex, Mode=TwoWay}" />
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
-                    <Label Classes="StandardLabel" Name="LeftEnterPairClassLabel" Content="{Binding LeftEnterPairClass, Mode=OneWay}" />
-                    <Label Classes="StandardLabel" Name="LeftEnterPairNameLabel" Content="{Binding LeftEnterPairName, Mode=OneWay}"  />
-                    <Label Classes="StandardLabel" Name="LeftEnterPairVehicleLabel" Content="{Binding LeftEnterPairVehicle, Mode=OneWay}" />
+                    <Label Classes="StandardLabel" Name="LeftEnterPairClassLabel"
+                           Content="{Binding LeftEnterPairClass, Mode=OneWay}" />
+                    <Label Classes="StandardLabel" Name="LeftEnterPairNameLabel"
+                           Content="{Binding LeftEnterPairName, Mode=OneWay}" />
+                    <Label Classes="StandardLabel" Name="LeftEnterPairVehicleLabel"
+                           Content="{Binding LeftEnterPairVehicle, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
         </Grid>
@@ -295,9 +303,11 @@
             <Grid Grid.Row="0" ColumnDefinitions="60,*,*"
                   RowDefinitions="Auto,Auto">
                 <controls:RunSetupLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed"
-                                        RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro" />
-                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Name="EnterPairFinishLabel" Classes="Finish"
-                                        RSLFinish="{Binding EnterPairFinishName, Mode=OneWay}" />
+                                        RSLLeftTree="{Binding EnterPairLeftSelectedTreeName}"
+                                        RSLRightTree="{Binding EnterPairRightSelectedTreeName}" RSLTree=".4 Pro" />
+                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Name="EnterPairFinishLabel"
+                                        Classes="Finish"
+                                        RSLFinish="{Binding EnterPairSelectedFinishName, Mode=OneWay}" />
             </Grid>
         </Grid>
         <Grid Grid.Row="5" Grid.Column="1" x:Name="SwiftSetEnterPairConfig" IsVisible="False"
@@ -306,28 +316,23 @@
                   RowDefinitions="Auto,Auto">
                 <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
                             HorizontalAlignment="Center">
-                    <ComboBox>
-                        <ComboBoxItem Content=".4 Pro" />
-                        <ComboBoxItem Content=".5 Full" />
-                        <ComboBoxItem Content="Delay" />
-                        <ComboBoxItem Content=".5 Pro" />
-                    </ComboBox>
+                    <ComboBox Name="LeftTreeComboBox"
+                              SelectedIndex="{Binding EnterPairLeftSelectedTreeIndex, Mode=TwoWay}"
+                              SelectedItem="{Binding EnterPairLeftSelectedTreeName, Mode=TwoWay}"
+                              ItemsSource="{Binding EnterPairTreeComboBoxItems, Mode=OneWay}"/>
                     <Label Classes="StandardLabel" Content="— Tree — " />
-                    <ComboBox>
-                        <ComboBoxItem Content=".4 Pro" />
-                        <ComboBoxItem Content=".5 Full" />
-                        <ComboBoxItem Content="Delay" />
-                        <ComboBoxItem Content=".5 Pro" />
-                    </ComboBox>
+                    <ComboBox Name="RightTreeComboBox"
+                              SelectedIndex="{Binding EnterPairRightSelectedTreeIndex, Mode=TwoWay}"
+                              SelectedItem="{Binding EnterPairRightSelectedTreeName, Mode=TwoWay}"
+                              ItemsSource="{Binding EnterPairTreeComboBoxItems, Mode=OneWay}"/>
                 </StackPanel>
                 <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
                             HorizontalAlignment="Center">
                     <Label Classes="StandardLabel" Content="Finish — " />
-                    <ComboBox>
-                        <ComboBoxItem Content="402.336m" />
-                        <ComboBoxItem Content="304.800m" />
-                        <ComboBoxItem Content="201.165" />
-                    </ComboBox>
+                    <ComboBox Name="FinishLineComboBox"
+                              SelectedIndex="{Binding EnterPairSelectedFinishIndex, Mode=TwoWay}"
+                              SelectedItem="{Binding EnterPairSelectedFinishName, Mode=TwoWay}"
+                              ItemsSource="{Binding EnterPairFinishComboBoxItems, Mode=OneWay}"/>
                 </StackPanel>
             </Grid>
         </Grid>
@@ -342,19 +347,27 @@
                 </Grid.Styles>
                 <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #"
                        VerticalContentAlignment="Center" />
-                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="RightRaceNumBox" MaxLength="16"
-                         TabIndex="3" KeyDown="RightRaceNumBox_OnKeyDown" KeyUp="RightRaceNumBox_OnKeyUp"
-                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding RightEnterPairRaceNum, Mode=TwoWay}" />
+                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="RightRaceNumBox"
+                         MaxLength="16" AcceptsReturn="False" TabIndex="3"
+                         Text="{Binding RightEnterPairRaceNum, Mode=TwoWay}"
+                         KeyDown="RaceNumBox_OnKeyDown"
+                         GotFocus="EnterPairTextBox_OnGotFocus"
+                         TextChanged="RaceNumBox_OnTextChanged" />
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="RightIndexBox"
-                         Watermark="00.00" TabIndex="4" KeyDown="RightIndexBox_OnKeyDown"
-                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding RightEnterPairIndex, Mode=TwoWay}" />
+                         Watermark="00.00" TabIndex="4"
+                         KeyDown="IndexBox_OnKeyDown"
+                         GotFocus="EnterPairTextBox_OnGotFocus"
+                         Text="{Binding RightEnterPairIndex, Mode=TwoWay}" />
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
-                    <Label Classes="StandardLabel" Name="RightEnterPairClassLabel" Content="{Binding RightEnterPairClass, Mode=OneWay}" />
-                    <Label Classes="StandardLabel" Name="RightEnterPairNameLabel" Content="{Binding RightEnterPairName, Mode=OneWay}"  />
-                    <Label Classes="StandardLabel" Name="RightEnterPairVehicleLabel" Content="{Binding RightEnterPairVehicle, Mode=OneWay}" />
+                    <Label Classes="StandardLabel" Name="RightEnterPairClassLabel"
+                           Content="{Binding RightEnterPairClass, Mode=OneWay}" />
+                    <Label Classes="StandardLabel" Name="RightEnterPairNameLabel"
+                           Content="{Binding RightEnterPairName, Mode=OneWay}" />
+                    <Label Classes="StandardLabel" Name="RightEnterPairVehicleLabel"
+                           Content="{Binding RightEnterPairVehicle, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
         </Grid>
@@ -428,7 +441,7 @@
                     <Label Classes="FKeyText" Content="Clear Queue" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="11" x:Name="F12Button" Classes="FKey" HotKey="Ctrl+F12">
+            <Button Grid.Column="11" x:Name="F12Button" Classes="FKey" HotKey="Ctrl+F12" Click="F12Button_OnClick">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F12" />
                     <Label Classes="FKeyText" Content="SwiftSet" />
