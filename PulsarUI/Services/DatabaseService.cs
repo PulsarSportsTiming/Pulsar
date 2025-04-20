@@ -3,12 +3,37 @@ using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using PulsarUI.Interfaces;
 using PulsarUI.Models;
+using Tmds.DBus.Protocol;
 
 namespace PulsarUI.Services
 {
     public class DatabaseService(string connectionString) : IDatabaseService
     {
-        public async Task WriteQueueAsync(RaceEntry entry)
+        public async Task WriteQueueCategoriesAsync(CategQueueItem category)
+        {
+            const string sqlText = @"
+                INSERT OR REPLACE INTO run_queue (queue_index, category, mode, round, finish)
+                VALUES(
+                       @QueueIndex,
+                       @Category,
+                       @Mode,
+                       @Round,
+                       @Finish
+                );";
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = sqlText;
+            command.Parameters.AddWithValue("@QueueIndex", category.QueueIndex);
+            command.Parameters.AddWithValue("@Category", category.Category);
+            command.Parameters.AddWithValue("@Mode", category.Mode);
+            command.Parameters.AddWithValue("@Round", category.Round);
+            command.Parameters.AddWithValue("@Finish", category.Finish);
+            
+            await command.ExecuteNonQueryAsync();
+        }
+        public async Task WriteQueueRacersAsync(RaceEntry entry)
         {
             const string sqlText = @"
                 INSERT OR REPLACE INTO run_queue_racers (queue_index, lane, race_number, handicap_index, tree)
@@ -16,8 +41,8 @@ namespace PulsarUI.Services
                     @QueueIndex, 
                     @Lane, 
                     @RaceNum, 
-                    @HandicapIndex, 
-                    COALESCE((SELECT tree FROM run_queue_racers WHERE queue_index = @QueueIndex AND lane = @Lane), 0)
+                    @HandicapIndex,
+                    @Tree
                 );";
 
             await using var connection = new SqliteConnection(connectionString);
@@ -29,11 +54,12 @@ namespace PulsarUI.Services
             command.Parameters.AddWithValue("@Lane", entry.Lane);
             command.Parameters.AddWithValue("@RaceNum", entry.RaceNumber);
             command.Parameters.AddWithValue("@HandicapIndex", entry.HandicapIndex);
+            command.Parameters.AddWithValue("@Tree", entry.Tree);
 
             await command.ExecuteNonQueryAsync();
         }
 
-        public async Task<IndexList> GetIndexListAsync(RaceEntry entry)
+        public async Task<IndexList> GetIndexListAsync(RaceEntry entry, CategQueueItem category)
         {
             var indexList = new IndexList();
             
@@ -65,9 +91,9 @@ namespace PulsarUI.Services
             
             await using var command = connection.CreateCommand();
             command.CommandText = sqlText;
-            command.Parameters.AddWithValue("@Category", entry.Category);
+            command.Parameters.AddWithValue("@Category", category.Category);
             command.Parameters.AddWithValue("@RaceNum", entry.RaceNumber);
-            command.Parameters.AddWithValue("Finish", entry.Finish);
+            command.Parameters.AddWithValue("Finish", category.Finish);
             
             await using var reader = await command.ExecuteReaderAsync();
 
@@ -82,10 +108,8 @@ namespace PulsarUI.Services
             return indexList;
         }
 
-        public async Task<RacerDetails> GetRacerDetailsAsync(RaceEntry entry)
+        public async Task<RaceEntry> GetRacerDetailsAsync(RaceEntry entry, CategQueueItem category)
         {
-            var racerDetails = new RacerDetails();
-            
             const string sqlText = """
                                    SELECT
                                    	classes.name AS ClassName,
@@ -103,19 +127,19 @@ namespace PulsarUI.Services
             
             await using var command = connection.CreateCommand();
             command.CommandText = sqlText;
-            command.Parameters.AddWithValue("@Category", entry.Category);
+            command.Parameters.AddWithValue("@Category", category.Category);
             command.Parameters.AddWithValue("@RaceNum", entry.RaceNumber);
             
             await using var reader = await command.ExecuteReaderAsync();
             
             while (await reader.ReadAsync())
             {
-                racerDetails.Class = reader["ClassName"].ToString();
-                racerDetails.Name = reader["RacerName"].ToString();
-                racerDetails.Vehicle = reader["Vehicle"].ToString();
+                entry.Class = reader["ClassName"].ToString();
+                entry.Name = reader["RacerName"].ToString();
+                entry.Vehicle = reader["Vehicle"].ToString();
             }
             
-            return racerDetails;
+            return entry;
         }
 
         public async Task<List<Category>> GetCategoryListAsync()
@@ -124,10 +148,13 @@ namespace PulsarUI.Services
             
             const string sqlText = """
                                    SELECT
+                                    categories.id,
                                    	categories.disp_order,
                                    	categories.name,
                                    	tree_types.name AS tree,
-                                   	finish_lines.description
+                                   	finish_lines.description,
+                                   	last_mode,
+                                   	last_round
                                    FROM categories
                                    JOIN tree_types ON categories.tree = tree_types.id
                                    JOIN finish_lines ON categories.finish = finish_lines.id
@@ -145,10 +172,13 @@ namespace PulsarUI.Services
             {
                 var category = new Category
                 {
-                    CategoryIndex = reader.GetInt32(reader.GetOrdinal("disp_order")),
+                    CategoryId = reader.GetInt32(reader.GetOrdinal("id")),
+                    CategoryOrder = reader.GetInt32(reader.GetOrdinal("disp_order")),
                     CategoryName = reader["name"].ToString(),
                     CategoryTreeType = reader["tree"].ToString(),
                     CategoryFinish = reader["description"].ToString(),
+                    LastMode = reader.GetInt32(reader.GetOrdinal("last_mode")),
+                    LastRound = reader.GetInt32(reader.GetOrdinal("last_round"))
                 };
                 categories.Add(category);
             }
@@ -178,7 +208,7 @@ namespace PulsarUI.Services
             return treeTypes;
         }
 
-        public async Task<List<string>> GetFinishLinesAsync()
+        public async Task<List<string?>> GetFinishLinesAsync()
         {
             List<string?> finishLines = [];
             

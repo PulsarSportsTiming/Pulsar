@@ -16,7 +16,6 @@
         <StyleInclude Source="/Controls/CompetitorInfo.axaml"/>
         <StyleInclude Source="/Controls/EnterPairControl.axaml"/>
         <StyleInclude Source="/Controls/TitleBar.axaml"/>
-        <StyleInclude Source="/Controls/RunSetupLabel.axaml"/>
         <StyleInclude Source="/Controls/CategoryButton.axaml"/>
         <StyleInclude Source="/TextStyles.axaml"/>
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>

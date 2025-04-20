@@ -7,10 +7,11 @@ namespace PulsarUI.Interfaces
 {
     public interface IDatabaseService
     {
-        Task WriteQueueAsync(RaceEntry entry);
-        Task<IndexList> GetIndexListAsync(RaceEntry entry);
+        Task WriteQueueCategoriesAsync(CategQueueItem category);
+        Task WriteQueueRacersAsync(RaceEntry entry);
+        Task<IndexList> GetIndexListAsync(RaceEntry entry, CategQueueItem category);
         
-        Task<RacerDetails> GetRacerDetailsAsync(RaceEntry entry);
+        Task<RaceEntry> GetRacerDetailsAsync(RaceEntry entry, CategQueueItem category);
         
         Task<List<Category>> GetCategoryListAsync();
 

@@ -36,10 +36,7 @@ namespace PulsarUI.Views
                             LeftRaceNumBox.Text) // If matches the other lane, clear the other lane
                         {
                             RightRaceNumBox.Text = string.Empty;
-                            _ = _viewModel.EnterPairRaceNumProcess(1);
                         }
-
-                        _ = _viewModel.EnterPairRaceNumProcess(0);
                         LeftIndexBox.Focus();
                         break;
                     case "RightRaceNumBox":
@@ -47,10 +44,7 @@ namespace PulsarUI.Views
                             RightRaceNumBox.Text) // If matches the other lane, clear the other lane
                         {
                             LeftRaceNumBox.Text = string.Empty;
-                            _ = _viewModel.EnterPairRaceNumProcess(0);
                         }
-
-                        _ = _viewModel.EnterPairRaceNumProcess(1);
                         RightIndexBox.Focus();
                         break;
                 }
@@ -81,19 +75,17 @@ namespace PulsarUI.Views
             
             if (e.Key is Key.Enter or Key.Tab)
             {
-                switch (textBox.Name)
+                if (textBox.Text != null) textBox.Text = PadIndexFormat(textBox.Text);
+                e.Handled = true;
+                switch (textBox?.Name)
                 {
                     case "LeftIndexBox":
-                        _ = _viewModel.EnterPairIndexProcess(0);
                         RightRaceNumBox.Focus();
                         break;
                     case "RightIndexBox":
-                        _ = _viewModel.EnterPairIndexProcess(1);
                         LeftRaceNumBox.Focus();
                         break;
                 }
-
-                e.Handled = true;
                 return;
             }
 

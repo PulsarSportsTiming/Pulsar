@@ -6,7 +6,7 @@
         xmlns:controls="clr-namespace:PulsarUI"
         mc:Ignorable="d" d:DesignWidth="1024" d:DesignHeight="768"
         x:Class="PulsarUI.Views.MainWindow"
-        Icon="/Assets/avalonia-logo.ico"
+        Icon="/Assets/PulsarIcon.ico"
         Title="PulsarUI"
         Background="#252525">
 
@@ -66,7 +66,7 @@
     <!--<Viewbox Stretch="Uniform" StretchDirection="Both">-->
     <Grid ColumnDefinitions="2*,*,2*" RowDefinitions="2*,30*,2*,3*,3*,5*,4*" Margin="1">
         <!-- Title Bar -->
-        <controls:TitleBar Grid.Column="0" Grid.Row="0" Grid.ColumnSpan="3" Classes="Top" TBLeft="2023-03-11 06:27:43"
+        <controls:TitleBar Grid.Column="0" Grid.Row="0" Grid.ColumnSpan="3" Classes="Top" TBLeft="{Binding CurrentTime, Mode=OneWay}"
                            TBCategory="Outlaw Flat Four" TBRound="Qualifying Round 1" />
 
         <!-- Left lane timing data -->
@@ -156,18 +156,18 @@
                                       SensorLabelText="402.336m" />
                 <controls:SensorIcon Grid.Row="13" Grid.Column="2" Classes="ErrorInactive" />
 
-                <controls:RunSetupLabel Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed"
+                <!--<controls:RunSetupLabel Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed"
                                         RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro" />
                 <controls:RunSetupLabel Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left"
-                                        Classes="StartMode" RSLStMode="Auto (7, 0.2)" />
+                                        Classes="StartMode" RSLStMode="Auto (7, 0.2)" />-->
                 <Grid Grid.Row="16" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="60,Auto,*"
                       HorizontalAlignment="Left">
                     <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Remote" />
                     <Label Grid.Column="1" Classes="StandardLabel" Content="—" />
                     <controls:SensorIcon Grid.Column="2" HorizontalAlignment="Left" Classes="OK" />
                 </Grid>
-                <controls:RunSetupLabel Grid.Row="17" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left"
-                                        Classes="Finish" RSLFinish="402.336m" />
+                <!--<controls:RunSetupLabel Grid.Row="17" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left"
+                                        Classes="Finish" RSLFinish="402.336m" />-->
                 <Grid Grid.Row="18" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="60,Auto,*"
                       HorizontalAlignment="Left">
                     <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Display" />
@@ -219,11 +219,18 @@
               Margin="0,1,0,1">
             <Grid Grid.Row="0" ColumnDefinitions="60,*,Auto"
                   RowDefinitions="Auto,Auto">
-                <controls:RunSetupLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeSingle"
-                                        RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro" />
-                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Classes="Finish"
-                                        RSLFinish="402.336m" />
+                <Grid Grid.Row="0" Grid.Column="1" ColumnDefinitions="*,Auto,*" HorizontalAlignment="Center">
+                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="{Binding EnterPairLeftSelectedTreeText}" />
+                    <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— Tree —" />
+                    <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding EnterPairRightSelectedTreeText, Mode=OneWay}" />
+                </Grid>
+                <Grid Grid.Row="1" Grid.Column="0" ColumnDefinitions="60,Auto,*" HorizontalAlignment="Left">
+                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Finish" />
+                    <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— " />
+                    <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding EnterPairFinishText, Mode=OneWay}" />
+                </Grid>
             </Grid>
+            
         </Grid>
 
         <!-- Queue Right -->
@@ -241,25 +248,27 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                         HorizontalAlignment="Center" IsVisible="True" x:Name="StandardEnterPairTitle">
                 <Label Classes="StandardLabelBold" Name="EnterPairCategNameLabel"
-                       Content="{Binding EnterPairCateg.CategoryName, Mode=OneWay}" />
+                       Content="{Binding EnterPairCategText, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="—" />
-                <Label Classes="StandardLabelBold" Content="{Binding EnterPairSelectedModeName, Mode=OneWay}"/>
+                <Label Classes="StandardLabelBold" Content="{Binding ElementName=ModeComboBox, Path=SelectedItem}"/>
                 <Label Classes="StandardLabelBold" Content="Round"/>
-                <Label Classes="StandardLabelBold" Content="{Binding EnterPairRound, Mode=OneWay}" />
+                <Label Classes="StandardLabelBold" Content="{Binding EnterPairQueueCategory.Round, Mode=OneWay}" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                         HorizontalAlignment="Center" IsVisible="False" x:Name="SwiftSetEnterPairTitle">
                 <Label Classes="StandardLabelBold" Content="Category" />
-                <ComboBox Width="250" SelectedIndex="{Binding EnterPairSelectedCategIndex, Mode=TwoWay}"
-                          SelectedItem="{Binding EnterPairSelectedCategText, Mode=TwoWay}"
+                <ComboBox Width="250" Margin="10,0,10,0"
+                          SelectedItem="{Binding EnterPairSelectedCategComboText, Mode=TwoWay}"
                           ItemsSource="{Binding CategComboBoxItems, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="Mode" />
-                <ComboBox Width="120" SelectedIndex="{Binding EnterPairSelectedModeIndex}"
-                          SelectedItem="{Binding EnterPairSelectedModeName}"
-                          ItemsSource="{Binding EnterPairModeComboBoxItems, Mode=OneWay}" />
+                <ComboBox Width="120" Margin="10,0,10,0" Name="ModeComboBox"
+                          SelectedIndex="{Binding EnterPairQueueCategory.Mode, FallbackValue=0, Mode=TwoWay}"
+                          ItemsSource="{Binding ModeList, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="Round" />
-                <NumericUpDown Minimum="1" Maximum="99" Value="{Binding EnterPairRound, Mode=TwoWay}" FormatString="0"
-                               Width="110" />
+                <NumericUpDown Width="110" Margin="10,0,10,0" Minimum="1" Maximum="99"
+                               Value="{Binding EnterPairQueueCategory.Round, FallbackValue=0, Mode=TwoWay}" FormatString="0"/>
+                <Label Classes="StandardLabelBold" Content="Last Round: "/>
+                <Label Classes="StandardLabelBold" Content="{Binding EnterPairQueueCategory.LastRound}"/>
             </StackPanel>
         </Grid>
 
@@ -275,39 +284,38 @@
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="LeftRaceNumBox"
                          MaxLength="16" AcceptsReturn="False" TabIndex="0"
-                         Text="{Binding LeftEnterPairRaceNum, Mode=TwoWay}"
-                         KeyDown="RaceNumBox_OnKeyDown"
-                         GotFocus="EnterPairTextBox_OnGotFocus"
-                         TextChanged="RaceNumBox_OnTextChanged" />
+                         Text="{Binding LeftEnterPairRacerEntry.RaceNumber, FallbackValue='', Mode=TwoWay}"
+                         KeyDown="RaceNumBox_OnKeyDown" GotFocus="EnterPairTextBox_OnGotFocus" TextChanged="RaceNumBox_OnTextChanged"/>
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="LeftIndexBox"
                          Watermark="00.00" TabIndex="1"
                          KeyDown="IndexBox_OnKeyDown"
-                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairIndex, Mode=TwoWay}" />
+                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairRacerEntry.HandicapIndex, FallbackValue='00.00', Mode=TwoWay}" />
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
                     <Label Classes="StandardLabel" Name="LeftEnterPairClassLabel"
-                           Content="{Binding LeftEnterPairClass, Mode=OneWay}" />
+                           Content="{Binding LeftEnterPairRacerEntry.Class, FallbackValue='', Mode=OneWay}" />
                     <Label Classes="StandardLabel" Name="LeftEnterPairNameLabel"
-                           Content="{Binding LeftEnterPairName, Mode=OneWay}" />
+                           Content="{Binding LeftEnterPairRacerEntry.Name, FallbackValue='', Mode=OneWay}" />
                     <Label Classes="StandardLabel" Name="LeftEnterPairVehicleLabel"
-                           Content="{Binding LeftEnterPairVehicle, Mode=OneWay}" />
+                           Content="{Binding LeftEnterPairRacerEntry.Vehicle, FallbackValue='', Mode=OneWay}" />
                 </StackPanel>
             </Grid>
         </Grid>
 
         <!-- Enter pair settings -->
         <Grid Grid.Row="5" Grid.Column="1" x:Name="StandardEnterPairConfig"
-              Background="{DynamicResource TitleBackground}" RowDefinitions="*" Margin="0,1,0,1">
-            <Grid Grid.Row="0" ColumnDefinitions="60,*,*"
-                  RowDefinitions="Auto,Auto">
-                <controls:RunSetupLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed"
-                                        RSLLeftTree="{Binding EnterPairLeftSelectedTreeName}"
-                                        RSLRightTree="{Binding EnterPairRightSelectedTreeName}" RSLTree=".4 Pro" />
-                <controls:RunSetupLabel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Name="EnterPairFinishLabel"
-                                        Classes="Finish"
-                                        RSLFinish="{Binding EnterPairSelectedFinishName, Mode=OneWay}" />
+              Background="{DynamicResource TitleBackground}" RowDefinitions="Auto,Auto,Auto" Margin="0,1,0,1">
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,*">
+                <Label Grid.Row="0" Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="{Binding ElementName=LeftTreeComboBox, Path=SelectedItem}" />
+                <Label Grid.Row="0" Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— Tree —" />
+                <Label Grid.Row="0" Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding ElementName=RightTreeComboBox, Path=SelectedItem}" />
+            </Grid>
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*">
+                <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Finish" />
+                <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content=" — " />
+                <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding ElementName=FinishLineComboBox, Path=SelectedItem}" />
             </Grid>
         </Grid>
         <Grid Grid.Row="5" Grid.Column="1" x:Name="SwiftSetEnterPairConfig" IsVisible="False"
@@ -317,22 +325,19 @@
                 <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
                             HorizontalAlignment="Center">
                     <ComboBox Name="LeftTreeComboBox"
-                              SelectedIndex="{Binding EnterPairLeftSelectedTreeIndex, Mode=TwoWay}"
-                              SelectedItem="{Binding EnterPairLeftSelectedTreeName, Mode=TwoWay}"
-                              ItemsSource="{Binding EnterPairTreeComboBoxItems, Mode=OneWay}"/>
-                    <Label Classes="StandardLabel" Content="— Tree — " />
+                              SelectedIndex="{Binding LeftEnterPairRacerEntry.Tree, FallbackValue=0, Mode=TwoWay}"
+                              ItemsSource="{Binding TreeList, Mode=OneWay}"/>
+                    <Label Classes="StandardLabel" Content="— Tree —" />
                     <ComboBox Name="RightTreeComboBox"
-                              SelectedIndex="{Binding EnterPairRightSelectedTreeIndex, Mode=TwoWay}"
-                              SelectedItem="{Binding EnterPairRightSelectedTreeName, Mode=TwoWay}"
-                              ItemsSource="{Binding EnterPairTreeComboBoxItems, Mode=OneWay}"/>
+                              SelectedIndex="{Binding RightEnterPairRacerEntry.Tree, FallbackValue=0, Mode=TwoWay}"
+                              ItemsSource="{Binding TreeList, Mode=OneWay}"/>
                 </StackPanel>
                 <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
                             HorizontalAlignment="Center">
                     <Label Classes="StandardLabel" Content="Finish — " />
                     <ComboBox Name="FinishLineComboBox"
-                              SelectedIndex="{Binding EnterPairSelectedFinishIndex, Mode=TwoWay}"
-                              SelectedItem="{Binding EnterPairSelectedFinishName, Mode=TwoWay}"
-                              ItemsSource="{Binding EnterPairFinishComboBoxItems, Mode=OneWay}"/>
+                              SelectedIndex="{Binding EnterPairQueueCategory.Finish, FallbackValue=0, Mode=TwoWay}"
+                              ItemsSource="{Binding FinishList, Mode=OneWay}"/>
                 </StackPanel>
             </Grid>
         </Grid>
@@ -349,25 +354,23 @@
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="RightRaceNumBox"
                          MaxLength="16" AcceptsReturn="False" TabIndex="3"
-                         Text="{Binding RightEnterPairRaceNum, Mode=TwoWay}"
-                         KeyDown="RaceNumBox_OnKeyDown"
-                         GotFocus="EnterPairTextBox_OnGotFocus"
-                         TextChanged="RaceNumBox_OnTextChanged" />
+                         Text="{Binding RightEnterPairRacerEntry.RaceNumber, FallbackValue='', Mode=TwoWay}"
+                         KeyDown="RaceNumBox_OnKeyDown" GotFocus="EnterPairTextBox_OnGotFocus" TextChanged="RaceNumBox_OnTextChanged" />
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="RightIndexBox"
                          Watermark="00.00" TabIndex="4"
                          KeyDown="IndexBox_OnKeyDown"
                          GotFocus="EnterPairTextBox_OnGotFocus"
-                         Text="{Binding RightEnterPairIndex, Mode=TwoWay}" />
+                         Text="{Binding RightEnterPairRacerEntry.HandicapIndex, FallbackValue='00.00', Mode=TwoWay}" />
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
                     <Label Classes="StandardLabel" Name="RightEnterPairClassLabel"
-                           Content="{Binding RightEnterPairClass, Mode=OneWay}" />
+                           Content="{Binding RightEnterPairRacerEntry.Class, FallbackValue='', Mode=OneWay}" />
                     <Label Classes="StandardLabel" Name="RightEnterPairNameLabel"
-                           Content="{Binding RightEnterPairName, Mode=OneWay}" />
+                           Content="{Binding RightEnterPairRacerEntry.Name, FallbackValue='', Mode=OneWay}" />
                     <Label Classes="StandardLabel" Name="RightEnterPairVehicleLabel"
-                           Content="{Binding RightEnterPairVehicle, Mode=OneWay}" />
+                           Content="{Binding RightEnterPairRacerEntry.Vehicle, FallbackValue='', Mode=OneWay}" />
                 </StackPanel>
             </Grid>
         </Grid>

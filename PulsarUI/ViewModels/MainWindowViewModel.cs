@@ -1,241 +1,238 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data.Entity.Infrastructure;
+using System.Globalization;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Controls;
-using CommunityToolkit.Mvvm.Input;
-using Avalonia.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
-using PulsarUI.Interfaces;
 using PulsarUI.Models;
 using PulsarUI.Services;
+using System.Timers;
+using Avalonia.Threading;
+using Timer = System.Timers.Timer;
 
 namespace PulsarUI.ViewModels
 {
     public partial class MainWindowViewModel : ViewModelBase
     {
-        private readonly IDatabaseService _databaseService;
+        private DispatcherTimer _clockTimer;
+        [ObservableProperty] private string _currentTime;
+
+        private readonly DatabaseService _databaseService;
 
         [GeneratedRegex(@"^(\d{0,2}(\.\d{0,2})?|\.?\d{0,2})?$")]
-    
+
         private static partial Regex IndexPatternRegex();
 
         // Category Properties
         [ObservableProperty] private Category? _enterPairCateg;
-        [ObservableProperty] private string? _enterPairSelectedCategText;
-        [ObservableProperty] private int _enterPairSelectedCategIndex;
         [ObservableProperty] private List<string>? _categComboBoxItems;
+        [ObservableProperty] private string? _enterPairSelectedCategComboText;
         [ObservableProperty] private List<Category?>? _categories;
-        
+        [ObservableProperty] private CategQueueItem _enterPairQueueCategory;
+        [ObservableProperty] private string? _enterPairCategText;
+
         // Race Mode Properties
-        [ObservableProperty] private List<string> _enterPairModeComboBoxItems;
-        [ObservableProperty] private int _enterPairSelectedModeIndex;
-        [ObservableProperty] private string? _enterPairSelectedModeName;
-        
-        // Round Number Properties
-        [ObservableProperty] private int _enterPairRound;
-        
+        [ObservableProperty] private List<string> _modeList;
+
         // Tree Type Properties
-        [ObservableProperty] private List<string> _enterPairTreeComboBoxItems;
-        [ObservableProperty] private int _enterPairLeftSelectedTreeIndex;
-        [ObservableProperty] private string? _enterPairLeftSelectedTreeName;
-        [ObservableProperty] private int _enterPairRightSelectedTreeIndex;
-        [ObservableProperty] private string? _enterPairRightSelectedTreeName;
-        
+        [ObservableProperty] private List<string> _treeList;
+
         // Finish Line Properties
-        [ObservableProperty] private List<string> _enterPairFinishComboBoxItems;
-        [ObservableProperty] private int _enterPairFinishIndex;
-        [ObservableProperty] private string _enterPairFinishName;
-        [ObservableProperty] private int _enterPairSelectedFinishIndex;
-        [ObservableProperty] private string? _enterPairSelectedFinishName;
-        
+        [ObservableProperty] private List<string?> _finishList;
+
         // Race Number Properties
         [ObservableProperty] private string? _leftEnterPairRaceNum;
         [ObservableProperty] private string? _rightEnterPairRaceNum;
-        
-        // Index/Dial-in Properties
-        [ObservableProperty] private string? _leftEnterPairIndex;
-        [ObservableProperty] private string? _rightEnterPairIndex;
-        
+
         // Racer Info Properties
-        [ObservableProperty] private string? _leftEnterPairClass;
-        [ObservableProperty] private string? _rightEnterPairClass;
-        [ObservableProperty] private string? _leftEnterPairName;
-        [ObservableProperty] private string? _rightEnterPairName;
-        [ObservableProperty] private string? _leftEnterPairVehicle;
-        [ObservableProperty] private string? _rightEnterPairVehicle;
+        [ObservableProperty] private RaceEntry? _leftEnterPairRacerEntry;
+        [ObservableProperty] private RaceEntry? _rightEnterPairRacerEntry;
 
         public MainWindowViewModel()
         {
+            // Date/Time Display
+            var now = DateTime.Now;
+            var msToNextSecond = 1000 - now.Millisecond;
+
+            Task.Delay(msToNextSecond).ContinueWith(_ => { StartClock(); });
+
             _databaseService = new DatabaseService("Data Source=/home/david/PulsarDB.db");
             _ = LoadFinishLinesAsync();
             _ = LoadTreeTypesAsync();
             _ = LoadCategoriesAsync();
-            EnterPairSelectedCategIndex = 0;
-            EnterPairModeComboBoxItems =
+
+            EnterPairQueueCategory = new CategQueueItem
+            {
+                QueueIndex = 0,
+                Category = 1,
+                Finish = 0,
+                Mode = 0,
+                Round = 1,
+                LastRound = 0
+            };
+
+            EnterPairQueueCategory.PropertyChanged += EnterPairQueueCategoryHandler;
+            EnterPairSelectedCategComboText = CategComboBoxItems?.FirstOrDefault();
+
+            LeftEnterPairRacerEntry = new RaceEntry
+            {
+                Category = 0,
+                Class = "",
+                HandicapIndex = "00.00",
+                Lane = 0,
+                Name = "",
+                QueueIndex = 0,
+                RaceNumber = "",
+                Tree = 0,
+                Vehicle = ""
+            };
+            LeftEnterPairRacerEntry.PropertyChanged += EnterPairRacerEntryHandler;
+
+            RightEnterPairRacerEntry = new RaceEntry
+            {
+                Category = 0,
+                Class = "",
+                HandicapIndex = "00.00",
+                Lane = 1,
+                Name = "",
+                QueueIndex = 0,
+                RaceNumber = "",
+                Tree = 0,
+                Vehicle = ""
+            };
+            RightEnterPairRacerEntry.PropertyChanged += EnterPairRacerEntryHandler;
+
+            ModeList =
             [
                 "Practice",
-                "Demonstration",
                 "Qualifying",
                 "Eliminations",
                 "Q+E Combo"
             ];
-            EnterPairSelectedModeIndex = 0;
-            EnterPairRound = 1;
         }
-        partial void OnEnterPairSelectedCategTextChanged(string? value)
+
+        private void StartClock()
         {
-            if (Categories != null)
-                EnterPairCateg =
-                    Categories.FirstOrDefault(c => value != null && c != null && c.CategoryIndex == int.Parse(value[..2]));
-
-            if (CategComboBoxItems != null && EnterPairCateg is { CategoryTreeType: not null })
-                EnterPairLeftSelectedTreeIndex = EnterPairRightSelectedTreeIndex =
-                    EnterPairTreeComboBoxItems.IndexOf(EnterPairCateg.CategoryTreeType);
-
-            if (EnterPairCateg != null && EnterPairCateg.CategoryFinish != null)
-                EnterPairSelectedFinishIndex = EnterPairFinishComboBoxItems.IndexOf(EnterPairCateg.CategoryFinish);
+            _clockTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _clockTimer.Tick += (_, _) => { CurrentTime = DateTime.Now.ToString(CultureInfo.CurrentCulture); };
+            _clockTimer.Start();
         }
 
+        private void EnterPairQueueCategoryHandler(object? sender, PropertyChangedEventArgs e)
+        {
+            EnterPairQueueCategory.PropertyChanged -= EnterPairQueueCategoryHandler;
+            switch (e.PropertyName)
+            {
+                case nameof(CategQueueItem.Category):
+                {
+                    var category = Categories?.Find(c => c?.CategoryId == EnterPairQueueCategory.Category);
+
+                    if (category == null) return;
+
+                    if (category.CategoryFinish != null)
+                    {
+                        EnterPairQueueCategory.Finish = FinishList.IndexOf(category.CategoryFinish);
+                    }
+
+                    if (category.CategoryTreeType != null && RightEnterPairRacerEntry != null &&
+                        LeftEnterPairRacerEntry != null)
+                    {
+                        LeftEnterPairRacerEntry.Tree =
+                            RightEnterPairRacerEntry.Tree = TreeList.IndexOf(category.CategoryTreeType);
+                    }
+
+                    EnterPairQueueCategory.Mode = category.LastMode;
+                    EnterPairQueueCategory.LastRound = category.LastRound;
+                    EnterPairQueueCategory.Round = category.LastRound + (category.LastRound == 0 ? 1 : 0);
+
+                    EnterPairCategText = category.CategoryName;
+                    EnterPairSelectedCategComboText =
+                        category.CategoryOrder.ToString("D2") + " - " + category.CategoryName;
+                    break;
+                }
+            }
+
+            EnterPairQueueCategory.PropertyChanged += EnterPairQueueCategoryHandler;
+            _ = _databaseService.WriteQueueCategoriesAsync(EnterPairQueueCategory);
+        }
+
+        private void EnterPairRacerEntryHandler(object? sender, PropertyChangedEventArgs e)
+        {
+            _ = EnterPairRacerEntryHandlerAsync(sender, e);
+        }
+
+        private async Task EnterPairRacerEntryHandlerAsync(object? sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not RaceEntry raceEntry) return;
+            switch (raceEntry.Lane)
+            {
+                case 0:
+                    if (LeftEnterPairRacerEntry == null) return;
+                    LeftEnterPairRacerEntry.PropertyChanged -= EnterPairRacerEntryHandler;
+                    break;
+                case 1:
+                    if (RightEnterPairRacerEntry == null) return;
+                    RightEnterPairRacerEntry.PropertyChanged -= EnterPairRacerEntryHandler;
+                    break;
+            }
+            
+            if (e.PropertyName == nameof(RaceEntry.RaceNumber))
+            {
+                var indexList = await _databaseService.GetIndexListAsync(raceEntry, EnterPairQueueCategory);
+                var indexes = new[]
+                {
+                    indexList.EventIndex,
+                    indexList.PersonalIndex,
+                    indexList.ClassIndex,
+                    indexList.CategoryIndex
+                };
+                raceEntry.HandicapIndex = indexes.FirstOrDefault(index => index != "") ?? "00.00";
+                raceEntry.ClearDetails();
+                raceEntry = await _databaseService.GetRacerDetailsAsync(raceEntry, EnterPairQueueCategory);
+            }
+            switch (raceEntry.Lane)
+            {
+                case 0:
+                    LeftEnterPairRacerEntry = raceEntry;
+                    LeftEnterPairRacerEntry.PropertyChanged += EnterPairRacerEntryHandler;
+                    break;
+                case 1:
+                    RightEnterPairRacerEntry = raceEntry;
+                    RightEnterPairRacerEntry.PropertyChanged += EnterPairRacerEntryHandler;
+                    break;
+            }
+            await _databaseService.WriteQueueRacersAsync(raceEntry);
+        }
+        partial void OnEnterPairSelectedCategComboTextChanged(string? text)
+        {
+            if (EnterPairSelectedCategComboText == null || Categories == null) return;
+            var categoryOrder = int.Parse(EnterPairSelectedCategComboText[..2]);
+
+            EnterPairQueueCategory.Category = Categories
+                .FirstOrDefault(c => c != null && c.CategoryOrder == categoryOrder)?.CategoryId ?? 0;
+        }
         private async Task LoadCategoriesAsync()
         {
             Categories = await _databaseService.GetCategoryListAsync();
             
-            var formattedItems = Categories.Select(c => $"{(c.CategoryIndex.ToString("D2"))} - {c.CategoryName}").ToList();
-            
-            CategComboBoxItems = formattedItems;
+            CategComboBoxItems = Categories.Select(c => c != null ? $"{(c.CategoryOrder.ToString("D2"))} - {c.CategoryName}" : null).ToList();
         }
 
         private async Task LoadTreeTypesAsync()
         {
-            var treeTypes = await _databaseService.GetTreeTypesAsync();
-            
-            EnterPairTreeComboBoxItems = treeTypes;
+            TreeList = await _databaseService.GetTreeTypesAsync();
         }
 
         private async Task LoadFinishLinesAsync()
         {
-            var finishLines = await _databaseService.GetFinishLinesAsync();
-            
-            EnterPairFinishComboBoxItems = finishLines;
-        }
-       
-        public async Task EnterPairRaceNumProcess(int lane)
-        {
-            var raceEntry = new RaceEntry
-            {
-                QueueIndex = 0,
-                Lane = lane,
-                Finish = EnterPairFinishIndex
-            };
-            switch (lane)
-            {
-                case 0:
-                    raceEntry.RaceNumber = LeftEnterPairRaceNum;
-                    raceEntry.Tree = EnterPairLeftSelectedTreeIndex;
-                    break;
-                case 1:
-                    raceEntry.RaceNumber = RightEnterPairRaceNum;
-                    raceEntry.Tree = EnterPairRightSelectedTreeIndex;
-                    break;
-            }
-            raceEntry.HandicapIndex = await GetVehIndexAsync(raceEntry.Lane);
-            await _databaseService.WriteQueueAsync(raceEntry);
-            await GetEntryDetailsAsync(raceEntry.Lane);
-        }
-
-        private async Task<string> GetVehIndexAsync(int lane)
-        {
-            var entry = new RaceEntry
-            {
-                Category = EnterPairCateg.CategoryIndex,
-                Finish = EnterPairFinishIndex,
-                RaceNumber = lane switch
-                {
-                    0 => LeftEnterPairRaceNum,
-                    1 => RightEnterPairRaceNum,
-                    _ => null
-                }
-            };
-
-            var indexList = await _databaseService.GetIndexListAsync(entry);
-
-            var indexes = new[]
-            {
-                indexList.EventIndex,
-                indexList.PersonalIndex,
-                indexList.ClassIndex,
-                indexList.CategoryIndex
-            };
-
-            switch (lane)
-            {
-                case 0:
-                    LeftEnterPairIndex = indexes.FirstOrDefault(index => index != "") ?? "00.00";
-                    break;
-                case 1:
-                    RightEnterPairIndex = indexes.FirstOrDefault(index => index != "") ?? "00.00";
-                    break;
-            }
-
-            return indexes.FirstOrDefault(index => index != "") ?? "00.00";
-        }
-        
-        private async Task GetEntryDetailsAsync(int lane)
-        {
-            var entry = new RaceEntry
-            {
-                Category = EnterPairCateg.CategoryIndex
-            };
-
-            entry.RaceNumber = lane switch
-            {
-                0 => LeftEnterPairRaceNum,
-                1 => RightEnterPairRaceNum,
-                _ => entry.RaceNumber
-            };
-            
-            var racerDetails = await _databaseService.GetRacerDetailsAsync(entry);
-
-            switch (lane)
-            {
-                case 0:
-                    LeftEnterPairClass = racerDetails.Class;
-                    LeftEnterPairName = racerDetails.Name;
-                    LeftEnterPairVehicle = racerDetails.Vehicle;
-                    break;
-                case 1:
-                    RightEnterPairClass = racerDetails.Class;
-                    RightEnterPairName = racerDetails.Name;
-                    RightEnterPairVehicle = racerDetails.Vehicle;
-                    break;
-            }
-        }
-
-        public async Task EnterPairIndexProcess(int lane)
-        {
-            var raceEntry = new RaceEntry
-            {
-                QueueIndex = 0,
-                Lane = lane,
-                Finish = EnterPairFinishIndex
-            };
-            switch (lane)
-            {
-                case 0:
-                    raceEntry.RaceNumber = LeftEnterPairRaceNum;
-                    raceEntry.HandicapIndex = LeftEnterPairIndex;
-                    raceEntry.Tree = EnterPairLeftSelectedTreeIndex;
-                    break;
-                case 1:
-                    raceEntry.RaceNumber = RightEnterPairRaceNum;
-                    raceEntry.HandicapIndex = RightEnterPairIndex;
-                    raceEntry.Tree = EnterPairRightSelectedTreeIndex;
-                    break;
-            }
-            await _databaseService.WriteQueueAsync(raceEntry);
+            FinishList = await _databaseService.GetFinishLinesAsync();
         }
     }
     

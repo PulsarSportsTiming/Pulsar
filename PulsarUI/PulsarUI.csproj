@@ -40,10 +40,6 @@
         <DependentUpon>EnterPairControl.axaml</DependentUpon>
         <SubType>Code</SubType>
       </Compile>
-      <Compile Update="Controls\RunSetupLabel.axaml.cs">
-        <DependentUpon>RunSetupLabel.axaml</DependentUpon>
-        <SubType>Code</SubType>
-      </Compile>
       <Compile Update="Controls\SensorLabel.axaml.cs">
         <DependentUpon>SensorLabel.axaml</DependentUpon>
         <SubType>Code</SubType>

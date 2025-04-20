@@ -1,14 +1,23 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+
 namespace PulsarUI.Models;
 
-public class RaceEntry
+public partial class RaceEntry : ObservableObject
 {
-    public int QueueIndex { get; set; }
-    public int Lane { get; set; }
-    public string? RaceNumber { get; set; }
-    public string? HandicapIndex { get; set; }
-    public int Tree { get; set; }
-    
-    public int Category { get; set; }
-    
-    public int Finish { get; set; }
+    [ObservableProperty] private int _queueIndex;
+    [ObservableProperty] private int _lane;
+    [ObservableProperty] private string? _raceNumber;
+    [ObservableProperty] private string? _handicapIndex;
+    [ObservableProperty] private int _tree;
+    [ObservableProperty] private int _category;
+    [ObservableProperty] private string? _class;
+    [ObservableProperty] private string? _name;
+    [ObservableProperty] private string? _vehicle;
+
+    public void ClearDetails()
+    {
+        Class = "";
+        Name = "";
+        Vehicle = "";
+    }
 }
