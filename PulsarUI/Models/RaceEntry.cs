@@ -20,4 +20,18 @@ public partial class RaceEntry : ObservableObject
         Name = "";
         Vehicle = "";
     }
+    
+    public RaceEntry Clone(int queueIndex)
+    {
+        return new RaceEntry
+        {
+            RaceNumber = this.RaceNumber,
+            Name = this.Name,
+            Vehicle = this.Vehicle,
+            Class = this.Class,
+            HandicapIndex = this.HandicapIndex,
+            QueueIndex = queueIndex,
+            Lane = this.Lane
+        };
+    }
 }

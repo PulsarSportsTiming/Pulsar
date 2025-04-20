@@ -205,38 +205,43 @@
 
         <!-- Queue Title -->
         <controls:TitleBar Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" TBLeft="Queued Pair"
-                           TBCategory="Nostalgia Superstock" TBRound="Elimination Round 1" />
+                           TBCategory="{Binding QueuePairCategText}"
+                           TBRound="{Binding QueuePairModeText}" />
 
         <!-- Queue Left -->
         <Grid Grid.Row="3" Grid.Column="0" Background="#303030" Margin="1">
-            <controls:CompetitorInfo Grid.Column="0" Grid.Row="0" CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET"
-                                     CIName="Jon Webster" CIModel="Mustang"
+            <controls:CompetitorInfo Grid.Column="0" Grid.Row="0"
+                                     CIRaceNum="{Binding LeftQueuePairRacerEntry.RaceNumber, FallbackValue=''}"
+                                     CIIndex="{Binding LeftQueuePairRacerEntry.HandicapIndex, FallbackValue=''}"
+                                     CIClass="{Binding LeftQueuePairRacerEntry.Class, FallbackValue=''}"
+                                     CIName="{Binding LeftQueuePairRacerEntry.Name, FallbackValue=''}"
+                                     CIModel="{Binding LeftQueuePairRacerEntry.Vehicle, FallbackValue=''}"
                                      CIBackground="{DynamicResource DetailBackground}" />
         </Grid>
 
         <!-- Queue pair settings -->
-        <Grid Grid.Row="3" Grid.Column="1" Background="{DynamicResource TitleBackground}" RowDefinitions="*"
+        <Grid Grid.Row="3" Grid.Column="1" Background="{DynamicResource TitleBackground}" RowDefinitions="*,*"
               Margin="0,1,0,1">
-            <Grid Grid.Row="0" ColumnDefinitions="60,*,Auto"
-                  RowDefinitions="Auto,Auto">
-                <Grid Grid.Row="0" Grid.Column="1" ColumnDefinitions="*,Auto,*" HorizontalAlignment="Center">
-                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="{Binding EnterPairLeftSelectedTreeText}" />
-                    <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— Tree —" />
-                    <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding EnterPairRightSelectedTreeText, Mode=OneWay}" />
-                </Grid>
-                <Grid Grid.Row="1" Grid.Column="0" ColumnDefinitions="60,Auto,*" HorizontalAlignment="Left">
-                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Finish" />
-                    <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— " />
-                    <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding EnterPairFinishText, Mode=OneWay}" />
-                </Grid>
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,*">
+                <Label Grid.Row="0" Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="{Binding QueuePairLeftTreeText}" />
+                <Label Grid.Row="0" Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— Tree —" />
+                <Label Grid.Row="0" Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding QueuePairRightTreeText}" />
             </Grid>
-            
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*">
+                <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Finish" />
+                <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content=" — " />
+                <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding QueuePairFinishText}" />
+            </Grid>
         </Grid>
 
         <!-- Queue Right -->
         <Grid Grid.Row="3" Grid.Column="2" Background="#303030" Margin="1">
-            <controls:CompetitorInfo Grid.Column="0" Grid.Row="0" CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET"
-                                     CIName="Jon Webster" CIModel="Mustang"
+            <controls:CompetitorInfo Grid.Column="0" Grid.Row="0"
+                                     CIRaceNum="{Binding RightQueuePairRacerEntry.RaceNumber, FallbackValue=''}"
+                                     CIIndex="{Binding RightQueuePairRacerEntry.HandicapIndex, FallbackValue=''}"
+                                     CIClass="{Binding RightQueuePairRacerEntry.Class, FallbackValue=''}"
+                                     CIName="{Binding RightQueuePairRacerEntry.Name, FallbackValue=''}"
+                                     CIModel="{Binding RightQueuePairRacerEntry.Vehicle, FallbackValue=''}"
                                      CIBackground="{DynamicResource DetailBackground}" />
         </Grid>
 
@@ -402,7 +407,7 @@
                     <Label Classes="FKeyText" Content="Swap" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="4" x:Name="F5Button" Classes="FKey" HotKey="F5">
+            <Button Grid.Column="4" x:Name="F5Button" Classes="FKey" HotKey="F5" Command="{Binding QueuePairCommand}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F5" />
                     <Label Classes="FKeyText" Content="Queue" />

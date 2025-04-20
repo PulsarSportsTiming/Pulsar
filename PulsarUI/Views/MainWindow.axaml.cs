@@ -91,7 +91,7 @@ namespace PulsarUI.Views
 
             var inputChar = e.KeySymbol ?? string.Empty;
             textBox.Text ??= string.Empty;
-            if (char.IsDigit(inputChar[0]) || (inputChar == "." && !textBox.Text.Contains('.')))
+            if (inputChar.Length > 0 && (char.IsDigit(inputChar[0]) || (inputChar == "." && !textBox.Text.Contains('.'))))
             {
                 // Get the current caret position
                 var caretIndex = textBox.CaretIndex;

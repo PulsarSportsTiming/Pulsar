@@ -12,6 +12,7 @@ using PulsarUI.Models;
 using PulsarUI.Services;
 using System.Timers;
 using Avalonia.Threading;
+using CommunityToolkit.Mvvm.Input;
 using Timer = System.Timers.Timer;
 
 namespace PulsarUI.ViewModels
@@ -34,23 +35,30 @@ namespace PulsarUI.ViewModels
         [ObservableProperty] private List<Category?>? _categories;
         [ObservableProperty] private CategQueueItem _enterPairQueueCategory;
         [ObservableProperty] private string? _enterPairCategText;
+        [ObservableProperty] private CategQueueItem _queuePairQueueCategory;
+        [ObservableProperty] private CategQueueItem _engagedPairQueueCategory;
+        [ObservableProperty] private string? _queuePairCategText;
 
         // Race Mode Properties
         [ObservableProperty] private List<string> _modeList;
+        [ObservableProperty] private string? _queuePairModeText;
 
         // Tree Type Properties
         [ObservableProperty] private List<string> _treeList;
+        [ObservableProperty] private string? _queuePairLeftTreeText;
+        [ObservableProperty] private string? _queuePairRightTreeText;
 
         // Finish Line Properties
         [ObservableProperty] private List<string?> _finishList;
-
-        // Race Number Properties
-        [ObservableProperty] private string? _leftEnterPairRaceNum;
-        [ObservableProperty] private string? _rightEnterPairRaceNum;
+        [ObservableProperty] private string? _queuePairFinishText;
 
         // Racer Info Properties
         [ObservableProperty] private RaceEntry? _leftEnterPairRacerEntry;
         [ObservableProperty] private RaceEntry? _rightEnterPairRacerEntry;
+        [ObservableProperty] private RaceEntry? _leftQueuePairRacerEntry;
+        [ObservableProperty] private RaceEntry? _rightQueuePairRacerEntry;
+        [ObservableProperty] private RaceEntry? _leftEngagePairRacerEntry;
+        [ObservableProperty] private RaceEntry? _rightEngagePairRacerEntry;
 
         public MainWindowViewModel()
         {
@@ -105,6 +113,42 @@ namespace PulsarUI.ViewModels
                 Vehicle = ""
             };
             RightEnterPairRacerEntry.PropertyChanged += EnterPairRacerEntryHandler;
+
+            QueuePairQueueCategory = new CategQueueItem
+            {
+                QueueIndex = 1,
+                Category = 1,
+                Finish = 0,
+                Mode = 0,
+                Round = 1,
+                LastRound = 0
+            };
+            
+            LeftQueuePairRacerEntry = new RaceEntry
+            {
+                Category = 0,
+                Class = "",
+                HandicapIndex = "00.00",
+                Lane = 0,
+                Name = "",
+                QueueIndex = 1,
+                RaceNumber = "",
+                Tree = 0,
+                Vehicle = ""
+            };
+            
+            RightQueuePairRacerEntry = new RaceEntry
+            {
+                Category = 0,
+                Class = "",
+                HandicapIndex = "00.00",
+                Lane = 1,
+                Name = "",
+                QueueIndex = 1,
+                RaceNumber = "",
+                Tree = 0,
+                Vehicle = ""
+            };
 
             ModeList =
             [
@@ -217,6 +261,54 @@ namespace PulsarUI.ViewModels
 
             EnterPairQueueCategory.Category = Categories
                 .FirstOrDefault(c => c != null && c.CategoryOrder == categoryOrder)?.CategoryId ?? 0;
+        }
+
+        [RelayCommand]
+        private void QueuePair()
+        {
+            var category = Categories?.Find(c => c?.CategoryId == EnterPairQueueCategory.Category);
+            if (category == null) return;
+            QueuePairCategText = category.CategoryName;
+            QueuePairFinishText = FinishList[EnterPairQueueCategory.Finish];
+            QueuePairModeText = ModeList[EnterPairQueueCategory.Mode] + " Round " +
+                                EnterPairQueueCategory.Round;
+            if (LeftEnterPairRacerEntry != null) QueuePairLeftTreeText = TreeList[LeftEnterPairRacerEntry.Tree];
+            if (RightEnterPairRacerEntry != null) QueuePairRightTreeText = TreeList[RightEnterPairRacerEntry.Tree];
+
+            QueuePairQueueCategory = EnterPairQueueCategory.Clone(1);
+            //reset tree types to category default in LeftEnterPairRacerEntry and RightEnterPairRacerEntry
+
+            EnterPairQueueCategory.Mode = category.LastMode;
+            EnterPairQueueCategory.LastRound = category.LastRound;
+            EnterPairQueueCategory.Round = category.LastRound + (category.LastRound == 0 ? 1 : 0);
+
+            EnterPairCategText = category.CategoryName;
+
+            if (LeftEnterPairRacerEntry != null)
+            {
+                LeftQueuePairRacerEntry = LeftEnterPairRacerEntry?.Clone(1);
+                LeftEnterPairRacerEntry.ClearDetails();
+                LeftEnterPairRacerEntry.RaceNumber = "";
+            }
+            else
+            {
+                LeftQueuePairRacerEntry = new RaceEntry();
+            }
+
+            if (RightEnterPairRacerEntry != null)
+            {
+                RightQueuePairRacerEntry = RightEnterPairRacerEntry?.Clone(1);
+                RightEnterPairRacerEntry.ClearDetails();
+                RightEnterPairRacerEntry.RaceNumber = "";
+            }
+            else
+            {
+                RightQueuePairRacerEntry = new RaceEntry();
+            }
+
+            _ = _databaseService.WriteQueueCategoriesAsync(QueuePairQueueCategory);
+            if (LeftQueuePairRacerEntry != null) _ = _databaseService.WriteQueueRacersAsync(LeftQueuePairRacerEntry);
+            if (RightQueuePairRacerEntry != null) _ = _databaseService.WriteQueueRacersAsync(RightQueuePairRacerEntry);
         }
         private async Task LoadCategoriesAsync()
         {
