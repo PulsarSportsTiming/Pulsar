@@ -20,6 +20,17 @@ public static class Program
             .StartWithClassicDesktopLifetime(args);
     }
 
+    // Designer (and some tooling) expects a parameterless BuildAvaloniaApp method.
+    // Provide an overload that delegates to the existing method so the designer can create an AppBuilder.
+    public static AppBuilder BuildAvaloniaApp()
+    {
+        // Return a minimal AppBuilder for design-time tools (no DI or heavy configuration).
+        return AppBuilder.Configure<App>()
+            .UsePlatformDetect()
+            .LogToTrace()
+            .UseReactiveUI();
+    }
+
     public static AppBuilder BuildAvaloniaApp(string[] args)
     {
         var builder = AppBuilder.Configure<App>()

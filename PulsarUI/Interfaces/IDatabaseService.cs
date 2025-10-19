@@ -13,8 +13,8 @@ namespace PulsarUI.Interfaces
         
         Task<List<Category>> GetCategoryListAsync();
 
-        Task<List<string?>> GetTreeTypesAsync();
+        Task<List<TreeType>> GetTreeTypesAsync();
         
-        Task<List<string?>> GetFinishLinesAsync();
+        Task<List<FinishLine>> GetFinishLinesAsync();
     }
 }

@@ -2,16 +2,28 @@ namespace PulsarUI.Models;
 
 public class Category
 {
-    public int CategoryOrder { get; set; }
-    
-    public int CategoryId { get; set; }
-    public string? CategoryName { get; set; }
-    
-    public string? CategoryTreeType { get; set; }
-    
-    public string? CategoryFinish { get; set; }
-    
+    public int Id { get; set; }
+    public int Order { get; set; }
+    public string? Name { get; set; }
+    public int Finish { get; set; }
+    public int RunTimeout { get; set; }
+    public string? BumpEt { get; set; }
+    public int TreeType { get; set; }
+    public int ElimMode { get; set; }
+    public bool SplitTreeAllowed { get; set; }
+    public bool StaggeredStartsAllowed { get; set; }
+    public int StartMode { get; set; }
+    public bool StageFreeze { get; set; }
+    public bool DeepStageFoul { get; set; }
+    public bool SbElimSpeed { get; set; }
+    public bool SbCycleUnits { get; set; }
+    public bool WorstFoul { get; set; }
+    public bool FoulInEmpty { get; set; }
+    public int AutoStartSettle { get; set; }
+    public int AutoStartStageToStart { get; set; }
+    public int AutoStartVariance { get; set; }
+    public int AutoStartTimeout { get; set; }
+    public int DefaultClass { get; set; }
     public int LastMode { get; set; }
-    
     public int LastRound { get; set; }
 }

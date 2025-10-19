@@ -120,20 +120,159 @@ namespace PulsarUI.Services
         public async Task<List<Category>> GetCategoryListAsync()
         {
             var categories = new List<Category>();
-            
+
             const string sqlText = """
                                    SELECT
-                                    categories.id,
-                                   	categories.disp_order,
-                                   	categories.name,
-                                   	tree_types.name AS tree,
-                                   	finish_lines.description,
-                                   	last_mode,
-                                   	last_round
+                                       categories.id,
+                                       categories.disp_order,
+                                       categories.name,
+                                       categories.finish,
+                                       finish_lines.description AS finish_desc,
+                                       categories.run_timeout,
+                                       categories.bump_et,
+                                       categories.tree,
+                                       tree_types.name AS tree_desc,
+                                       categories.elim_mode,
+                                       categories.split_tree,
+                                       categories.stagger_tree,
+                                       categories.start_mode,
+                                       categories.stage_freeze,
+                                       categories.ds_foul,
+                                       categories.sb_elim_speed,
+                                       categories.sb_units,
+                                       categories.worst_foul,
+                                       categories.foul_empty,
+                                       categories.as_settle,
+                                       categories.as_stagetostart,
+                                       categories.as_variance,
+                                       categories.as_timeout,
+                                       categories.def_class,
+                                       classes.name AS def_class_name,
+                                       categories.last_mode,
+                                       categories.last_round
                                    FROM categories
-                                   JOIN tree_types ON categories.tree = tree_types.id
-                                   JOIN finish_lines ON categories.finish = finish_lines.id
+                                            JOIN tree_types ON categories.tree = tree_types.id
+                                            JOIN finish_lines ON categories.finish = finish_lines.id
+                                            LEFT OUTER JOIN classes ON categories.def_class = classes.id
                                    ORDER BY categories.disp_order
+                                   """;
+            await using var connection = await OpenConnectionAsync();
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = sqlText;
+
+            await using var reader = await command.ExecuteReaderAsync();
+
+            // local helpers to safely read nullable columns
+            int ReadInt(string col)
+            {
+                var idx = reader.GetOrdinal(col);
+                return reader.IsDBNull(idx) ? 0 : reader.GetInt32(idx);
+            }
+
+            bool ReadBool(string col)
+            {
+                var idx = reader.GetOrdinal(col);
+                if (reader.IsDBNull(idx)) return false;
+                // Try boolean directly, fall back to integer check for 0/1 storage
+                try
+                {
+                    return reader.GetBoolean(idx);
+                }
+                catch
+                {
+                    return reader.GetInt32(idx) != 0;
+                }
+            }
+
+            string? ReadString(string col) => reader[col] as string;
+
+            while (await reader.ReadAsync())
+            {
+                var category = new Category
+                {
+                    Id = ReadInt("id"),
+                    Order = ReadInt("disp_order"),
+                    Name = ReadString("name"),
+                    Finish = ReadInt("finish"),
+                    RunTimeout = ReadInt("run_timeout"),
+                    BumpEt = ReadString("bump_et"),
+                    TreeType = ReadInt("tree"),
+                    ElimMode = ReadInt("elim_mode"),
+                    SplitTreeAllowed = ReadBool("split_tree"),
+                    StaggeredStartsAllowed = ReadBool("stagger_tree"),
+                    StartMode = ReadInt("start_mode"),
+                    StageFreeze = ReadBool("stage_freeze"),
+                    DeepStageFoul = ReadBool("ds_foul"),
+                    SbElimSpeed = ReadBool("sb_elim_speed"),
+                    SbCycleUnits = ReadBool("sb_units"),
+                    WorstFoul = ReadBool("worst_foul"),
+                    FoulInEmpty = ReadBool("foul_empty"),
+                    AutoStartSettle = ReadInt("as_settle"),
+                    AutoStartStageToStart = ReadInt("as_stagetostart"),
+                    AutoStartVariance = ReadInt("as_variance"),
+                    AutoStartTimeout = ReadInt("as_timeout"),
+                    DefaultClass = ReadInt("def_class"),
+                    LastMode = ReadInt("last_mode"),
+                    LastRound = ReadInt("last_round")
+                };
+                categories.Add(category);
+            }
+
+            return categories;
+        }
+
+        public async Task<List<TreeType>> GetTreeTypesAsync()
+        {
+            var treeTypes = new List<TreeType>();
+
+            const string sqlText = """
+                                   SELECT
+                                       tree_types.id,
+                                       tree_types.name,
+                                       tree_types.countdown_speed,
+                                       tree_types.countdown_type
+                                   FROM tree_types
+                                   ORDER BY tree_types.id;
+                                   """;
+            await using var connection = await OpenConnectionAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = sqlText;
+            await using var reader = await command.ExecuteReaderAsync();
+
+            var idIdx = reader.GetOrdinal("id");
+            var nameIdx = reader.GetOrdinal("name");
+            var speedIdx = reader.GetOrdinal("countdown_speed");
+            var typeIdx = reader.GetOrdinal("countdown_type");
+
+            while (await reader.ReadAsync())
+            {
+                var treeType = new TreeType
+                {
+                    Id = reader.GetInt32(idIdx),
+                    Name = reader.GetString(nameIdx),
+                    CountdownSpeed = reader.GetInt32(speedIdx),
+                    CountdownType = reader.GetInt32(typeIdx)
+                };
+                treeTypes.Add(treeType);
+            }
+
+            return treeTypes;
+        }
+
+        public async Task<List<FinishLine>> GetFinishLinesAsync()
+        {
+            var finishLines = new List<FinishLine>();
+
+            const string sqlText = """
+                                   SELECT
+                                       finish_lines.id,
+                                       finish_lines.timing_point,
+                                       finish_lines.description
+                                   FROM
+                                       finish_lines
+                                   JOIN timing_points ON finish_lines.timing_point = timing_points.id
+                                   ORDER BY timing_points.distance ASC
                                    """;
             await using var connection = await OpenConnectionAsync();
             
@@ -142,61 +281,19 @@ namespace PulsarUI.Services
             
             await using var reader = await command.ExecuteReaderAsync();
             
+            var idIdx = reader.GetOrdinal("id");
+            var timingPointIdx = reader.GetOrdinal("timing_point");
+            var descriptionIdx = reader.GetOrdinal("description");
+
             while (await reader.ReadAsync())
             {
-                var category = new Category
+                var finishLine = new FinishLine()
                 {
-                    CategoryId = reader.GetInt32(reader.GetOrdinal("id")),
-                    CategoryOrder = reader.GetInt32(reader.GetOrdinal("disp_order")),
-                    CategoryName = reader["name"].ToString(),
-                    CategoryTreeType = reader["tree"].ToString(),
-                    CategoryFinish = reader["description"].ToString(),
-                    LastMode = reader.GetInt32(reader.GetOrdinal("last_mode")),
-                    LastRound = reader.GetInt32(reader.GetOrdinal("last_round"))
+                    Id = reader.GetInt32(idIdx),
+                    TimingPointId = reader.GetInt32(timingPointIdx),
+                    Description = reader.GetString(descriptionIdx)
                 };
-                categories.Add(category);
-            }
-            
-            return categories;
-        }
-
-        public async Task<List<string?>> GetTreeTypesAsync()
-        {
-            var treeTypes = new List<string?>();
-            
-            const string sqlText =
-                "SELECT tree_types.name FROM tree_types ORDER BY tree_types.id;";
-            await using var connection = await OpenConnectionAsync();
-            
-            await using var command = connection.CreateCommand();
-            command.CommandText = sqlText;
-            
-            await using var reader = await command.ExecuteReaderAsync();
-            
-            while (await reader.ReadAsync())
-            {
-                treeTypes.Add(reader["name"].ToString());
-            }
-
-            return treeTypes;
-        }
-
-        public async Task<List<string?>> GetFinishLinesAsync()
-        {
-            var finishLines = new List<string?>();
-            
-            const string sqlText =
-                "SELECT finish_lines.description FROM finish_lines ORDER BY id;";
-            await using var connection = await OpenConnectionAsync();
-            
-            await using var command = connection.CreateCommand();
-            command.CommandText = sqlText;
-            
-            await using var reader = await command.ExecuteReaderAsync();
-            
-            while (await reader.ReadAsync())
-            {
-                finishLines.Add(reader["description"].ToString());
+                finishLines.Add(finishLine);
             }
 
             return finishLines;

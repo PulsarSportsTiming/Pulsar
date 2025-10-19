@@ -13,13 +13,15 @@ using CommunityToolkit.Mvvm.Input;
 using System.Threading.Tasks;
 using Avalonia.Controls.Documents;
 using System.Collections.ObjectModel;
+using Microsoft.Extensions.Configuration;
 
 namespace PulsarUI.ViewModels
 {
     public partial class MainWindowViewModel : ViewModelBase
     {
-        private DispatcherTimer _clockTimer;
-        [ObservableProperty] private string _currentTime;
+        // Initialize to suppress 'non-nullable field must contain a non-null value' warnings
+        private DispatcherTimer _clockTimer = default!;
+        [ObservableProperty] private string _currentTime = string.Empty;
 
         private readonly DatabaseService _databaseService;
         
@@ -40,26 +42,23 @@ namespace PulsarUI.ViewModels
         private bool _systemEngaged;
         partial void OnSystemEngagedChanged(bool value)
         {
-            OnPropertyChanged(nameof(IsF5Enabled));
-            OnPropertyChanged(nameof(IsF10Enabled));
-            OnPropertyChanged(nameof(IsF11Enabled));
+            UpdateButtonStatuses();
         }
 
         [ObservableProperty]
         private bool _runActive;
         partial void OnRunActiveChanged(bool value)
         {
-            OnPropertyChanged(nameof(IsF5Enabled));
-            OnPropertyChanged(nameof(IsF10Enabled));
-            OnPropertyChanged(nameof(IsF11Enabled));
+            UpdateButtonStatuses();
         }
 
         // Category Properties
         [ObservableProperty] private Category? _enterPairCateg;
         [ObservableProperty] private List<Category?>? _categories;
         [ObservableProperty] private List<string>? _categComboBoxItems;
+        [ObservableProperty] private List<string>? _treeComboBoxItems;
         [ObservableProperty] private string? _enterPairSelectedCategComboText;
-        private CategQueueItem _enterPairQueueCategory;
+        private CategQueueItem _enterPairQueueCategory = default!;
         
         public CategQueueItem EnterPairQueueCategory
         {
@@ -76,7 +75,7 @@ namespace PulsarUI.ViewModels
         }
         
         [ObservableProperty] private string? _enterPairCategText;
-        private CategQueueItem _queuePairQueueCategory;
+        private CategQueueItem _queuePairQueueCategory = default!;
         
         public CategQueueItem QueuePairQueueCategory
         {
@@ -94,7 +93,7 @@ namespace PulsarUI.ViewModels
             }
         }
         [ObservableProperty] private string? _queuePairCategText;
-        private CategQueueItem _engagePairQueueCategory;
+        private CategQueueItem _engagePairQueueCategory = default!;
         public CategQueueItem EngagePairQueueCategory
         {
             get => _engagePairQueueCategory;
@@ -113,21 +112,48 @@ namespace PulsarUI.ViewModels
         [ObservableProperty] private string? _engagePairCategText;
 
         // Race Mode Properties
-        [ObservableProperty] private List<string> _modeList;
+        [ObservableProperty] private List<string> _modeList = new();
         [ObservableProperty] private string? _queuePairModeText;
         [ObservableProperty] private string? _engagePairModeText;
 
         // Tree Type Properties
-        [ObservableProperty] private List<string> _treeList;
+        [ObservableProperty] private List<TreeType> _treeList = new();
         [ObservableProperty] private string? _queuePairLeftTreeText;
         [ObservableProperty] private string? _queuePairRightTreeText;
         [ObservableProperty] private string? _engagePairLeftTreeText;
         [ObservableProperty] private string? _engagePairRightTreeText;
+        // Selected tree items for binding SelectedItem in XAML (strongly-typed)
+        [ObservableProperty] private TreeType? _selectedLeftTree;
+        partial void OnSelectedLeftTreeChanged(TreeType? value)
+        {
+            if (value == null || TreeList == null) return;
+            var idx = TreeList.IndexOf(value);
+            if (idx >= 0 && EnterRacers.Count > 0 && EnterRacers[0].Tree != idx)
+                EnterRacers[0].Tree = idx;
+        }
+
+        [ObservableProperty] private TreeType? _selectedRightTree;
+        partial void OnSelectedRightTreeChanged(TreeType? value)
+        {
+            if (value == null || TreeList == null) return;
+            var idx = TreeList.IndexOf(value);
+            if (idx >= 0 && EnterRacers.Count > 1 && EnterRacers[1].Tree != idx)
+                EnterRacers[1].Tree = idx;
+        }
 
         // Finish Line Properties
-        [ObservableProperty] private List<string?> _finishList;
+        [ObservableProperty] private List<FinishLine> _finishList = new();
         [ObservableProperty] private string? _queuePairFinishText;
         [ObservableProperty] private string? _engagePairFinishText;
+        // Selected finish item for binding SelectedItem in XAML
+        [ObservableProperty] private FinishLine? _selectedFinishLine;
+        partial void OnSelectedFinishLineChanged(FinishLine? value)
+        {
+            if (value == null || FinishList == null || EnterPairQueueCategory == null) return;
+            var idx = FinishList.IndexOf(value);
+            if (idx >= 0 && EnterPairQueueCategory.Finish != idx)
+                EnterPairQueueCategory.Finish = idx;
+        }
 
         // Racer Info Properties
         public ObservableCollection<RaceEntry> EnterRacers { get; } = new ObservableCollection<RaceEntry> { new RaceEntry { Lane = 0, QueueIndex = 0 }, new RaceEntry { Lane = 1, QueueIndex = 0 } };
@@ -136,13 +162,41 @@ namespace PulsarUI.ViewModels
 
         public MainWindowViewModel()
         {
-            // Date/Time Display
-            var now = DateTime.Now;
-            var msToNextSecond = 1000 - now.Millisecond;
+            // Short-circuit heavy initialization in design mode so the XAML designer can instantiate this VM safely.
+            if (Avalonia.Controls.Design.IsDesignMode)
+            {
+                // Provide minimal defaults used by the design-time preview
+                ModeList = new List<string>
+                {
+                    "Practice",
+                    "Qualifying",
+                    "Eliminations",
+                    "Q+E Combo"
+                };
+                // Ensure there are empty placeholders so bindings in XAML don't NRE
+                EnterPairQueueCategory = new CategQueueItem { QueueIndex = 0, Category = 0, Finish = 0, Mode = 0, Round = 1, LastRound = 0 };
+                return;
+            }
+             // Date/Time Display
+             var now = DateTime.Now;
+             var msToNextSecond = 1000 - now.Millisecond;
 
-            Task.Delay(msToNextSecond).ContinueWith(_ => { StartClock(); });
+             Task.Delay(msToNextSecond).ContinueWith(_ => { StartClock(); });
 
-            _databaseService = new DatabaseService("Data Source=/home/david/PulsarDB.db");
+            // Build configuration from appsettings.json and appsettings.local.json (local overrides)
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+                .AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true)
+                .AddEnvironmentVariables()
+                .Build();
+
+            // Try to read the DB connection string from configuration; fall back to the previous hard-coded path
+            var dbConnectionString = configuration.GetSection("Database")["ConnectionString"]
+                                     ?? configuration["ConnectionString"]
+                                     ?? "Data Source=/home/david/PulsarDB.db";
+
+            _databaseService = new DatabaseService(dbConnectionString);
             _ = LoadFinishLinesAsync();
             _ = LoadTreeTypesAsync();
             _ = LoadCategoriesAsync();
@@ -198,7 +252,7 @@ namespace PulsarUI.ViewModels
                         await _mqttService.PubQueueRacersAsync(EnterRacers[0]);
                 }
                 // Ensure F5 updates after confirming
-                OnPropertyChanged(nameof(IsF5Enabled));
+                UpdateButtonStatuses();
             });
 
             RightRaceNumConfirmedCommand = new RelayCommand(async () =>
@@ -212,7 +266,7 @@ namespace PulsarUI.ViewModels
                         await _mqttService.PubQueueRacersAsync(EnterRacers[1]);
                 }
                 // Ensure F5 updates after confirming
-                OnPropertyChanged(nameof(IsF5Enabled));
+                UpdateButtonStatuses();
             });
 
             LeftIndexConfirmedCommand = new RelayCommand(async () =>
@@ -226,6 +280,25 @@ namespace PulsarUI.ViewModels
                 if (EnterRacers[1] != null)
                     await _mqttService.PubQueueRacersAsync(EnterRacers[1]);
             });
+
+            // Keep handlers in sync if collection items are replaced or changed
+            EnterRacers.CollectionChanged += (s, e) =>
+            {
+                if (e.OldItems != null)
+                    foreach (RaceEntry oldR in e.OldItems) oldR.PropertyChanged -= EnterPairRacerEntryHandler;
+                if (e.NewItems != null)
+                    foreach (RaceEntry newR in e.NewItems) newR.PropertyChanged += EnterPairRacerEntryHandler;
+                UpdateButtonStatuses();
+            };
+
+            QueuedRacers.CollectionChanged += (s, e) =>
+            {
+                if (e.OldItems != null)
+                    foreach (RaceEntry oldR in e.OldItems) oldR.PropertyChanged -= QueuePairRacerEntry_PropertyChanged;
+                if (e.NewItems != null)
+                    foreach (RaceEntry newR in e.NewItems) newR.PropertyChanged += QueuePairRacerEntry_PropertyChanged;
+                UpdateButtonStatuses();
+            };
         }
 
         // Stub for missing event handler to fix compile error
@@ -237,9 +310,11 @@ namespace PulsarUI.ViewModels
                 e.PropertyName == nameof(RaceEntry.Name) ||
                 e.PropertyName == nameof(RaceEntry.Vehicle))
             {
-                OnPropertyChanged(nameof(IsF5Enabled));
-                OnPropertyChanged(nameof(IsF10Enabled));
-                OnPropertyChanged(nameof(IsF11Enabled));
+                UpdateButtonStatuses();
+                // Notify RelayCommands so UI updates immediately
+                (QueuePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
+                (EngagePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
+                (ClearQueueCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
             }
             // TODO: Implement logic if needed
         }
@@ -273,6 +348,14 @@ namespace PulsarUI.ViewModels
         {
             if (EnterPairQueueCategory == null)
                 return;
+            // Sync selected finish item to numeric finish index
+            if (FinishList != null && FinishList.Count > 0)
+            {
+                SelectedFinishLine = (EnterPairQueueCategory.Finish >= 0 && EnterPairQueueCategory.Finish < FinishList.Count)
+                    ? FinishList[EnterPairQueueCategory.Finish]
+                    : FinishList.FirstOrDefault();
+            }
+
             if (IsCategQueueItemDifferent(EnterPairQueueCategory, _lastSentEnterPairQueueCategory))
             {
                 _ = _mqttService.PubQueueCategAsync(EnterPairQueueCategory);
@@ -284,6 +367,10 @@ namespace PulsarUI.ViewModels
         {
             if (QueuePairQueueCategory == null)
                 return;
+            if (FinishList != null && FinishList.Count > 0)
+            {
+                // Optionally keep a queue-pair selected finish property; for now keep the textual binding updated elsewhere
+            }
             if (IsCategQueueItemDifferent(QueuePairQueueCategory, _lastSentQueuePairQueueCategory))
             {
                 _ = _mqttService.PubQueueCategAsync(QueuePairQueueCategory);
@@ -310,15 +397,25 @@ namespace PulsarUI.ViewModels
                 e.PropertyName == nameof(RaceEntry.Name) ||
                 e.PropertyName == nameof(RaceEntry.Vehicle))
             {
-                OnPropertyChanged(nameof(IsF5Enabled));
-                OnPropertyChanged(nameof(IsF10Enabled));
-                OnPropertyChanged(nameof(IsF11Enabled));
+                UpdateButtonStatuses();
+                // Notify RelayCommands so UI updates immediately
+                (QueuePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
+                (EngagePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
+                (ClearQueueCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
             }
             // Send Tree value over MQTT when it changes
             if (e.PropertyName == nameof(RaceEntry.Tree) && sender is RaceEntry raceEntry)
             {
                 // Publish the updated RaceEntry, including the new Tree value
                 _ = _mqttService?.PubQueueRacersAsync(raceEntry);
+                // Keep SelectedItem bindings in sync with the numeric Tree index
+                if (TreeList != null)
+                {
+                    if (raceEntry.Lane == 0)
+                        SelectedLeftTree = (raceEntry.Tree >= 0 && raceEntry.Tree < TreeList.Count) ? TreeList[raceEntry.Tree] : null;
+                    else if (raceEntry.Lane == 1)
+                        SelectedRightTree = (raceEntry.Tree >= 0 && raceEntry.Tree < TreeList.Count) ? TreeList[raceEntry.Tree] : null;
+                }
             }
             _ = EnterPairRacerEntryHandlerAsync(sender, e);
         }
@@ -364,29 +461,29 @@ namespace PulsarUI.ViewModels
                     break;
             }
         }
-        partial void OnEnterPairSelectedCategComboTextChanged(string? text)
+        partial void OnEnterPairSelectedCategComboTextChanged(string? value)
         {
             if (EnterPairSelectedCategComboText == null || Categories == null) return;
             // Parse the category name from the ComboBox string (format: "01 - Sportsman ET")
             var split = EnterPairSelectedCategComboText.Split(" - ", 2);
             if (split.Length < 2) return;
             var categoryName = split[1].Trim();
-            var category = Categories.FirstOrDefault(c => c != null && c.CategoryName == categoryName);
+            var category = Categories.FirstOrDefault(c => c != null && c.Name == categoryName);
             if (category == null) return;
-            EnterPairQueueCategory.Category = category.CategoryId;
-            EnterPairCategText = category.CategoryName;
+            EnterPairQueueCategory.Category = category.Id;
+            EnterPairCategText = category.Name;
         }
 
         [RelayCommand]
         private void QueuePair()
         {
-            var category = Categories?.Find(c => c?.CategoryId == EnterPairQueueCategory.Category);
+            var category = Categories?.Find(c => c?.Id == EnterPairQueueCategory.Category);
             if (category == null) return;
-            QueuePairCategText = category.CategoryName;
-            QueuePairFinishText = FinishList[EnterPairQueueCategory.Finish];
+            QueuePairCategText = category.Name;
+            QueuePairFinishText = "holla";// FinishList[EnterPairQueueCategory.Finish];
             QueuePairModeText = ModeList[EnterPairQueueCategory.Mode] + " Round " + EnterPairQueueCategory.Round;
             QueuePairQueueCategory = EnterPairQueueCategory.Clone(1);
-            EnterPairCategText = category.CategoryName;
+            EnterPairCategText = category.Name;
             for (int i = 0; i < EnterRacers.Count; i++)
             {
                 QueuedRacers[i] = EnterRacers[i].Clone(1);
@@ -399,9 +496,7 @@ namespace PulsarUI.ViewModels
             {
                 _ = _mqttService.PubQueueRacersAsync(racer);
             }
-            OnPropertyChanged(nameof(IsF5Enabled));
-            OnPropertyChanged(nameof(IsF10Enabled));
-            OnPropertyChanged(nameof(IsF11Enabled));
+            UpdateButtonStatuses();
         }
 
         [RelayCommand]
@@ -425,36 +520,34 @@ namespace PulsarUI.ViewModels
             Category? category;
             if (queueHasEntries)
             {
-                category = Categories?.Find(c => c?.CategoryId == QueuePairQueueCategory.Category);
+                category = Categories?.Find(c => c?.Id == QueuePairQueueCategory.Category);
                 EngagePairQueueCategory = QueuePairQueueCategory.Clone(2);
             }
             else
             {
-                category = Categories?.Find(c => c?.CategoryId == EnterPairQueueCategory.Category);
+                category = Categories?.Find(c => c?.Id == EnterPairQueueCategory.Category);
                 EngagePairQueueCategory = EnterPairQueueCategory.Clone(2);
                 for (int i = 0; i < EnterRacers.Count; i++)
                 {
                     EnterRacers[i].ClearAll();
                     _ = _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 0, Lane = i });
                 }
-                OnPropertyChanged(nameof(IsF5Enabled));
+                UpdateButtonStatuses();
             }
             if (category == null) return;
-            EngagePairCategText = category.CategoryName;
+            EngagePairCategText = category.Name;
             SystemEngaged = true;
-            OnPropertyChanged(nameof(IsF10Enabled));
+            UpdateButtonStatuses();
         }
 
         [RelayCommand]
         private void ResetEngagePair()
         {
             SystemEngaged = false;
-            OnPropertyChanged(nameof(IsF10Enabled));
+            UpdateButtonStatuses();
             foreach (var racer in EngagedRacers)
                 racer.ClearAll();
-            OnPropertyChanged(nameof(IsF5Enabled));
-            OnPropertyChanged(nameof(IsF10Enabled));
-            OnPropertyChanged(nameof(IsF11Enabled));
+            UpdateButtonStatuses();
         }
 
         [RelayCommand]
@@ -497,9 +590,7 @@ namespace PulsarUI.ViewModels
                 racer.ClearAll();
             for (int i = 0; i < QueuedRacers.Count; i++)
                 await _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 1, Lane = i });
-            OnPropertyChanged(nameof(IsF5Enabled));
-            OnPropertyChanged(nameof(IsF10Enabled));
-            OnPropertyChanged(nameof(IsF11Enabled));
+            UpdateButtonStatuses();
         }
 
         public async Task ClearEnterPairQueue()
@@ -508,9 +599,7 @@ namespace PulsarUI.ViewModels
                 racer.ClearAll();
             for (int i = 0; i < EnterRacers.Count; i++)
                 await _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 0, Lane = i });
-            OnPropertyChanged(nameof(IsF5Enabled));
-            OnPropertyChanged(nameof(IsF10Enabled));
-            OnPropertyChanged(nameof(IsF11Enabled));
+            UpdateButtonStatuses();
         }
 
         public async Task ClearEngagePairQueue()
@@ -519,16 +608,14 @@ namespace PulsarUI.ViewModels
                 racer.ClearAll();
             for (int i = 0; i < EngagedRacers.Count; i++)
                 await _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 2, Lane = i });
-            OnPropertyChanged(nameof(IsF5Enabled));
-            OnPropertyChanged(nameof(IsF10Enabled));
-            OnPropertyChanged(nameof(IsF11Enabled));
+            UpdateButtonStatuses();
         }
         
         private async Task LoadCategoriesAsync()
         {
             Categories = await _databaseService.GetCategoryListAsync();
 
-            CategComboBoxItems = Categories.Select(c => c != null ? $"{(c.CategoryOrder.ToString("D2"))} - {c.CategoryName}" : null).ToList();
+            CategComboBoxItems = Categories.Select(c => c != null ? $"{(c.Order.ToString("D2"))} - {c.Name}" : null).ToList();
 
             await _mqttService.PublishMqtt("pulsarui/sysmsg","Loading categories...");
         }
@@ -536,11 +623,32 @@ namespace PulsarUI.ViewModels
         private async Task LoadTreeTypesAsync()
         {
             TreeList = await _databaseService.GetTreeTypesAsync();
+            // Initialize SelectedLeftTree/SelectedRightTree from existing EnterRacers' Tree indices
+            if (TreeList != null && TreeList.Count > 0)
+            {
+                if (EnterRacers.Count > 0 && EnterRacers[0].Tree >= 0 && EnterRacers[0].Tree < TreeList.Count)
+                    SelectedLeftTree = TreeList[EnterRacers[0].Tree];
+                else
+                    SelectedLeftTree = TreeList.FirstOrDefault();
+
+                if (EnterRacers.Count > 1 && EnterRacers[1].Tree >= 0 && EnterRacers[1].Tree < TreeList.Count)
+                    SelectedRightTree = TreeList[EnterRacers[1].Tree];
+                else
+                    SelectedRightTree = TreeList.ElementAtOrDefault(1) ?? TreeList.FirstOrDefault();
+            }
         }
 
         private async Task LoadFinishLinesAsync()
         {
             FinishList = await _databaseService.GetFinishLinesAsync();
+            // Initialize SelectedFinishLine from EnterPairQueueCategory's Finish index
+            if (FinishList != null && FinishList.Count > 0 && EnterPairQueueCategory != null)
+            {
+                if (EnterPairQueueCategory.Finish >= 0 && EnterPairQueueCategory.Finish < FinishList.Count)
+                    SelectedFinishLine = FinishList[EnterPairQueueCategory.Finish];
+                else
+                    SelectedFinishLine = FinishList.FirstOrDefault();
+            }
         }
 
         // F5 (Queue) is enabled if any EnterRacers have a RaceNumber and all QueuedRacers are empty
@@ -558,5 +666,13 @@ namespace PulsarUI.ViewModels
         // F11 (Clear Queue) is enabled only when any QueuedRacers have a RaceNumber
         public bool IsF11Enabled =>
             QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
+
+        // Centralized helper to update all button-related bindings
+        private void UpdateButtonStatuses()
+        {
+            OnPropertyChanged(nameof(IsF5Enabled));
+            OnPropertyChanged(nameof(IsF10Enabled));
+            OnPropertyChanged(nameof(IsF11Enabled));
+        }
     }
 }

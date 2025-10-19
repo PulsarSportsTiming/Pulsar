@@ -328,14 +328,14 @@
         <Grid Grid.Row="5" Grid.Column="1" x:Name="StandardEnterPairConfig"
               Background="{DynamicResource TitleBackground}" RowDefinitions="Auto,Auto,Auto" Margin="0,1,0,1">
             <Grid Grid.Row="0" ColumnDefinitions="*,Auto,*">
-                <Label Grid.Row="0" Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="{Binding ElementName=LeftTreeComboBox, Path=SelectedItem}" />
+                <Label Grid.Row="0" Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="{Binding ElementName=LeftTreeComboBox, Path=SelectedItem.Name, FallbackValue=''}" />
                 <Label Grid.Row="0" Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— Tree —" />
-                <Label Grid.Row="0" Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding ElementName=RightTreeComboBox, Path=SelectedItem}" />
+                <Label Grid.Row="0" Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding ElementName=RightTreeComboBox, Path=SelectedItem.Name, FallbackValue=''}" />
             </Grid>
             <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*">
                 <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Finish" />
                 <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content=" — " />
-                <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding ElementName=FinishLineComboBox, Path=SelectedItem}" />
+                <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding ElementName=FinishLineComboBox, Path=SelectedItem.Description}" />
             </Grid>
         </Grid>
         <Grid Grid.Row="5" Grid.Column="1" x:Name="SwiftSetEnterPairConfig" IsVisible="False"
@@ -345,18 +345,21 @@
                 <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
                             HorizontalAlignment="Center">
                     <ComboBox Name="LeftTreeComboBox"
-                              SelectedIndex="{Binding EnterRacers[0].Tree, FallbackValue=0, Mode=TwoWay}"
+                              SelectedItem="{Binding SelectedLeftTree, Mode=TwoWay}"
+                              DisplayMemberBinding="{Binding Name}"
                               ItemsSource="{Binding TreeList, Mode=OneWay}"/>
                     <Label Classes="StandardLabel" Content="— Tree —" />
                     <ComboBox Name="RightTreeComboBox"
-                              SelectedIndex="{Binding EnterRacers[1].Tree, FallbackValue=0, Mode=TwoWay}"
+                              SelectedItem="{Binding SelectedRightTree, Mode=TwoWay}"
+                              DisplayMemberBinding="{Binding Name}"
                               ItemsSource="{Binding TreeList, Mode=OneWay}"/>
                 </StackPanel>
                 <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
                             HorizontalAlignment="Center">
                     <Label Classes="StandardLabel" Content="Finish — " />
                     <ComboBox Name="FinishLineComboBox"
-                              SelectedIndex="{Binding EnterPairQueueCategory.Finish, FallbackValue=0, Mode=TwoWay}"
+                              SelectedItem="{Binding SelectedFinishLine, Mode=TwoWay}"
+                              DisplayMemberBinding="{Binding Description}"
                               ItemsSource="{Binding FinishList, Mode=OneWay}"/>
                 </StackPanel>
             </Grid>
