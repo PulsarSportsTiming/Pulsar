@@ -88,9 +88,11 @@ public static class Program
             .UseReactiveUI()
             .AfterSetup(_ =>
             {
-                // Set the ServiceProvider for Avalonia
-                var app = (App)Application.Current;
-                app.ServiceProvider = serviceProvider;
+                // Safely set the ServiceProvider for Avalonia if Application.Current is available
+                if (Application.Current is App app)
+                {
+                    app.ServiceProvider = serviceProvider;
+                }
             });
     }
 }

@@ -11,11 +11,14 @@ namespace PulsarUI.Views
 {
     public partial class MainWindow : Window
     {
-        private readonly MainWindowViewModel _viewModel;
+        // Provide a design-time view model in the parameterless constructor to satisfy non-nullable usages in XAML
+        private MainWindowViewModel _viewModel;
 
         public MainWindow()
         {
+            _viewModel = new MainWindowViewModel();
             InitializeComponent();
+            DataContext = _viewModel;
         }
         public MainWindow(MainWindowViewModel viewModel)
         {
@@ -24,7 +27,7 @@ namespace PulsarUI.Views
             DataContext = _viewModel;
         }
         
-        private async void RaceNumBox_OnKeyDown(object? sender, KeyEventArgs e)
+        private void RaceNumBox_OnKeyDown(object? sender, KeyEventArgs e)
         {
             if (sender is not TextBox textBox) return;
 

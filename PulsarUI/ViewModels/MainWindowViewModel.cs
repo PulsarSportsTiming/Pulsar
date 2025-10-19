@@ -23,16 +23,18 @@ namespace PulsarUI.ViewModels
         private DispatcherTimer _clockTimer = default!;
         [ObservableProperty] private string _currentTime = string.Empty;
 
-        private readonly DatabaseService _databaseService;
-        
-        private readonly MqttService _mqttService;
+        // Services may be uninitialized in the design-time constructor path; mark with default! to suppress warnings
+        private readonly DatabaseService _databaseService = default!;
+
+        private readonly MqttService _mqttService = default!;
 
         private string? _lastConfirmedRaceNum;
-        
-        public ICommand LeftRaceNumConfirmedCommand { get; }
-        public ICommand RightRaceNumConfirmedCommand { get; }
-        public ICommand LeftIndexConfirmedCommand { get; }
-        public ICommand RightIndexConfirmedCommand { get; }
+
+        // Provide no-op default commands for design-time so bindings can be evaluated safely
+        public ICommand LeftRaceNumConfirmedCommand { get; } = new RelayCommand(() => { });
+        public ICommand RightRaceNumConfirmedCommand { get; } = new RelayCommand(() => { });
+        public ICommand LeftIndexConfirmedCommand { get; } = new RelayCommand(() => { });
+        public ICommand RightIndexConfirmedCommand { get; } = new RelayCommand(() => { });
 
         [GeneratedRegex(@"^(\d{0,2}(\.\d{0,2})?|\.?\d{0,2})?$")]
 
@@ -54,12 +56,13 @@ namespace PulsarUI.ViewModels
 
         // Category Properties
         [ObservableProperty] private Category? _enterPairCateg;
-        [ObservableProperty] private List<Category?>? _categories;
-        [ObservableProperty] private List<string>? _categComboBoxItems;
+        // Categories are returned as a non-nullable list of Category objects from the DB service
+        [ObservableProperty] private List<Category> _categories = new();
+        [ObservableProperty] private List<string> _categComboBoxItems = new();
         [ObservableProperty] private List<string>? _treeComboBoxItems;
         [ObservableProperty] private string? _enterPairSelectedCategComboText;
         private CategQueueItem _enterPairQueueCategory = default!;
-        
+
         public CategQueueItem EnterPairQueueCategory
         {
             get => _enterPairQueueCategory;
@@ -73,10 +76,10 @@ namespace PulsarUI.ViewModels
                 OnPropertyChanged(nameof(EnterPairQueueCategory));
             }
         }
-        
+
         [ObservableProperty] private string? _enterPairCategText;
         private CategQueueItem _queuePairQueueCategory = default!;
-        
+
         public CategQueueItem QueuePairQueueCategory
         {
             get => _queuePairQueueCategory;
@@ -200,7 +203,7 @@ namespace PulsarUI.ViewModels
             _ = LoadFinishLinesAsync();
             _ = LoadTreeTypesAsync();
             _ = LoadCategoriesAsync();
-            
+
             _mqttService = new MqttService();
             _ = LoadCategoriesAsync();
 
@@ -434,7 +437,7 @@ namespace PulsarUI.ViewModels
                     EnterRacers[1].PropertyChanged -= EnterPairRacerEntryHandler;
                     break;
             }
-            
+
             if (e.PropertyName == nameof(RaceEntry.RaceNumber))
             {
                 var indexList = await _databaseService.GetIndexListAsync(raceEntry, EnterPairQueueCategory);
@@ -610,12 +613,16 @@ namespace PulsarUI.ViewModels
                 await _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 2, Lane = i });
             UpdateButtonStatuses();
         }
-        
+
         private async Task LoadCategoriesAsync()
         {
+            // Load categories (DB returns a non-null List<Category>)
             Categories = await _databaseService.GetCategoryListAsync();
 
-            CategComboBoxItems = Categories.Select(c => c != null ? $"{(c.Order.ToString("D2"))} - {c.Name}" : null).ToList();
+            // Build the combo box items from the loaded categories
+            CategComboBoxItems = Categories
+                .Select(c => $"{c.Order.ToString("D2")} - {c.Name}")
+                .ToList();
 
             await _mqttService.PublishMqtt("pulsarui/sysmsg","Loading categories...");
         }

@@ -7,20 +7,26 @@ namespace PulsarUI;
 
 public class ViewLocator : IDataTemplate
 {
-    public Control Build(object data)
+    // Use nullable-aware signatures to match Avalonia interfaces and avoid null dereferences
+    public Control? Build(object? data)
     {
-        var name = data.GetType().FullName!.Replace("ViewModel", "View");
+        if (data == null)
+            return new TextBlock { Text = "Not Found: (null)" };
+
+        // Use a safe fallback if FullName is null (rare), avoid null-forgiving operator
+        var fullName = data.GetType().FullName ?? data.GetType().Name ?? string.Empty;
+        var name = fullName.Replace("ViewModel", "View");
         var type = Type.GetType(name);
 
         if (type != null)
         {
-            return (Control)Activator.CreateInstance(type)!;
+            return (Control?)Activator.CreateInstance(type);
         }
 
         return new TextBlock { Text = "Not Found: " + name };
     }
 
-    public bool Match(object data)
+    public bool Match(object? data)
     {
         return data is ViewModelBase;
     }
