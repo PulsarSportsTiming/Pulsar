@@ -3,3 +3,6 @@ obj/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+
+# Local project-specific appsettings
+PulsarUI/appsettings.local.json

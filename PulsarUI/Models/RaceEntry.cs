@@ -21,6 +21,19 @@ public partial class RaceEntry : ObservableObject
         Vehicle = "";
     }
     
+    public void ClearAll()
+    {
+        RaceNumber = "";
+        HandicapIndex = "";
+        Class = "";
+        Name = "";
+        Vehicle = "";
+        QueueIndex = 0;
+        Lane = 0;
+        Tree = 0;
+        Category = 0;
+    }
+    
     public RaceEntry Clone(int queueIndex)
     {
         return new RaceEntry

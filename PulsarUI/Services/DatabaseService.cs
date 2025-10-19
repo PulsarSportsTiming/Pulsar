@@ -7,56 +7,33 @@ using Tmds.DBus.Protocol;
 
 namespace PulsarUI.Services
 {
-    public class DatabaseService(string connectionString) : IDatabaseService
+    public class DatabaseService : IDatabaseService
     {
-        public async Task WriteQueueCategoriesAsync(CategQueueItem category)
-        {
-            const string sqlText = @"
-                INSERT OR REPLACE INTO run_queue (queue_index, category, mode, round, finish)
-                VALUES(
-                       @QueueIndex,
-                       @Category,
-                       @Mode,
-                       @Round,
-                       @Finish
-                );";
-            await using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync();
+        private readonly string _connectionString;
 
-            await using var command = connection.CreateCommand();
-            command.CommandText = sqlText;
-            command.Parameters.AddWithValue("@QueueIndex", category.QueueIndex);
-            command.Parameters.AddWithValue("@Category", category.Category);
-            command.Parameters.AddWithValue("@Mode", category.Mode);
-            command.Parameters.AddWithValue("@Round", category.Round);
-            command.Parameters.AddWithValue("@Finish", category.Finish);
-            
-            await command.ExecuteNonQueryAsync();
+        public DatabaseService(string connectionString)
+        {
+            _connectionString = connectionString;
         }
-        public async Task WriteQueueRacersAsync(RaceEntry entry)
-        {
-            const string sqlText = @"
-                INSERT OR REPLACE INTO run_queue_racers (queue_index, lane, race_number, handicap_index, tree)
-                VALUES (
-                    @QueueIndex, 
-                    @Lane, 
-                    @RaceNum, 
-                    @HandicapIndex,
-                    @Tree
-                );";
 
-            await using var connection = new SqliteConnection(connectionString);
+        // Helper to open a connection and enable WAL mode for better concurrency
+        private async Task<SqliteConnection> OpenConnectionAsync()
+        {
+            var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
-            await using var command = connection.CreateCommand();
-            command.CommandText = sqlText;
-            command.Parameters.AddWithValue("@QueueIndex", entry.QueueIndex);
-            command.Parameters.AddWithValue("@Lane", entry.Lane);
-            command.Parameters.AddWithValue("@RaceNum", entry.RaceNumber);
-            command.Parameters.AddWithValue("@HandicapIndex", entry.HandicapIndex);
-            command.Parameters.AddWithValue("@Tree", entry.Tree);
+            // Enable WAL journal mode to allow concurrent readers with a writer
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = "PRAGMA journal_mode=WAL;";
+                await cmd.ExecuteNonQueryAsync();
 
-            await command.ExecuteNonQueryAsync();
+                // Use NORMAL synchronous for a balance between durability and performance
+                cmd.CommandText = "PRAGMA synchronous=NORMAL;";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            return connection;
         }
 
         public async Task<IndexList> GetIndexListAsync(RaceEntry entry, CategQueueItem category)
@@ -86,14 +63,13 @@ namespace PulsarUI.Services
                                    	racers.race_number = @RaceNum
                                    """;
             
-            await using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
             
             await using var command = connection.CreateCommand();
             command.CommandText = sqlText;
             command.Parameters.AddWithValue("@Category", category.Category);
             command.Parameters.AddWithValue("@RaceNum", entry.RaceNumber);
-            command.Parameters.AddWithValue("Finish", category.Finish);
+            command.Parameters.AddWithValue("@Finish", category.Finish);
             
             await using var reader = await command.ExecuteReaderAsync();
 
@@ -122,8 +98,7 @@ namespace PulsarUI.Services
                                    	racers.race_number = @RaceNum
                                    """;
             
-            await using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
             
             await using var command = connection.CreateCommand();
             command.CommandText = sqlText;
@@ -144,7 +119,7 @@ namespace PulsarUI.Services
 
         public async Task<List<Category>> GetCategoryListAsync()
         {
-            List<Category> categories = [];
+            var categories = new List<Category>();
             
             const string sqlText = """
                                    SELECT
@@ -160,8 +135,7 @@ namespace PulsarUI.Services
                                    JOIN finish_lines ON categories.finish = finish_lines.id
                                    ORDER BY categories.disp_order
                                    """;
-            await using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
             
             await using var command = connection.CreateCommand();
             command.CommandText = sqlText;
@@ -188,12 +162,11 @@ namespace PulsarUI.Services
 
         public async Task<List<string?>> GetTreeTypesAsync()
         {
-            List<string?> treeTypes = [];
+            var treeTypes = new List<string?>();
             
             const string sqlText =
                 "SELECT tree_types.name FROM tree_types ORDER BY tree_types.id;";
-            await using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
             
             await using var command = connection.CreateCommand();
             command.CommandText = sqlText;
@@ -210,12 +183,11 @@ namespace PulsarUI.Services
 
         public async Task<List<string?>> GetFinishLinesAsync()
         {
-            List<string?> finishLines = [];
+            var finishLines = new List<string?>();
             
             const string sqlText =
                 "SELECT finish_lines.description FROM finish_lines ORDER BY id;";
-            await using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync();
+            await using var connection = await OpenConnectionAsync();
             
             await using var command = connection.CreateCommand();
             command.CommandText = sqlText;

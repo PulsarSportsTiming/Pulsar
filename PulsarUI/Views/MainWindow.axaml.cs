@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using CommunityToolkit.Mvvm.Input;
 using PulsarUI.ViewModels;
 
 namespace PulsarUI.Views
@@ -23,46 +24,69 @@ namespace PulsarUI.Views
             DataContext = _viewModel;
         }
         
-        private void RaceNumBox_OnKeyDown(object? sender, KeyEventArgs e)
+        private async void RaceNumBox_OnKeyDown(object? sender, KeyEventArgs e)
         {
-            var textBox = sender as TextBox;
-            
+            if (sender is not TextBox textBox) return;
+
             if (e.Key is Key.Enter or Key.Tab)
             {
-                switch (textBox?.Name)
+                string text = textBox.Text ?? "";
+
+                // Trigger MQTT command manually for the correct box
+                if (textBox.Name == "LeftRaceNumBox")
+                {
+                    if (_viewModel.LeftRaceNumConfirmedCommand.CanExecute(text))
+                    {
+                        (_viewModel.LeftRaceNumConfirmedCommand as RelayCommand)?.Execute(null);
+                    }
+                }
+                else if (textBox.Name == "RightRaceNumBox" && _viewModel.RightRaceNumConfirmedCommand.CanExecute(text))
+                {
+                    (_viewModel.RightRaceNumConfirmedCommand as RelayCommand)?.Execute(null);
+                }
+
+                // Lane logic
+                switch (textBox.Name)
                 {
                     case "LeftRaceNumBox":
-                        if (RightRaceNumBox.Text ==
-                            LeftRaceNumBox.Text) // If matches the other lane, clear the other lane
-                        {
-                            RightRaceNumBox.Text = string.Empty;
-                        }
+                        if (RightRaceNumBox.Text == text) RightRaceNumBox.Text = string.Empty;
                         LeftIndexBox.Focus();
                         break;
                     case "RightRaceNumBox":
-                        if (LeftRaceNumBox.Text ==
-                            RightRaceNumBox.Text) // If matches the other lane, clear the other lane
-                        {
-                            LeftRaceNumBox.Text = string.Empty;
-                        }
+                        if (LeftRaceNumBox.Text == text) LeftRaceNumBox.Text = string.Empty;
                         RightIndexBox.Focus();
                         break;
                 }
+
                 e.Handled = true;
                 return;
             }
-            
-            var inputChar = e.KeySymbol ?? " ";
 
-            if (inputChar.Length != 0 && char.IsLetterOrDigit(inputChar[0])) return;
-            e.Handled = true;
+            // Block invalid characters
+            var inputChar = e.KeySymbol ?? "";
+            if (inputChar.Length != 0 && !char.IsLetterOrDigit(inputChar[0]))
+                e.Handled = true;
         }
 
         private void RaceNumBox_OnTextChanged(object? sender, TextChangedEventArgs e)
         {
             if (sender is not TextBox textBox) return;
             if (textBox.Text == null) return;
-            textBox.Text = textBox.Text.ToUpper();
+
+            // Remove non-alphanumeric characters
+            var filteredText = new string(textBox.Text.Where(char.IsLetterOrDigit).ToArray());
+
+            // Make uppercase
+            filteredText = filteredText.ToUpper();
+
+            if (textBox.Text != filteredText)
+            {
+                var caretIndex = textBox.CaretIndex;
+                textBox.Text = filteredText;
+                textBox.CaretIndex = Math.Min(caretIndex, filteredText.Length);
+            }
+
+            // Optional: limit length
             if (textBox.Text.Length >= 16)
             {
                 textBox.SelectAll();
@@ -80,9 +104,17 @@ namespace PulsarUI.Views
                 switch (textBox?.Name)
                 {
                     case "LeftIndexBox":
+                        if (_viewModel.LeftIndexConfirmedCommand.CanExecute(null))
+                        {
+                            (_viewModel.LeftIndexConfirmedCommand as RelayCommand)?.Execute(null);
+                        }
                         RightRaceNumBox.Focus();
                         break;
                     case "RightIndexBox":
+                        if (_viewModel.RightIndexConfirmedCommand.CanExecute(null))
+                        {
+                            (_viewModel.RightIndexConfirmedCommand as RelayCommand)?.Execute(null);
+                        }
                         LeftRaceNumBox.Focus();
                         break;
                 }

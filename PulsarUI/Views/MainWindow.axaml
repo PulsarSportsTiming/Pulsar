@@ -3,6 +3,8 @@
         xmlns:vm="using:PulsarUI.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:i="using:Avalonia.Xaml.Interactivity"
+        xmlns:ia="using:Avalonia.Xaml.Interactions.Core"
         xmlns:controls="clr-namespace:PulsarUI"
         mc:Ignorable="d" d:DesignWidth="1024" d:DesignHeight="768"
         x:Class="PulsarUI.Views.MainWindow"
@@ -52,10 +54,6 @@
             </Setter>
             <Setter Property="Background" Value="Blue" />
         </Style>
-        <Style Selector="Label.FKeyText">
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="HorizontalAlignment" Value="Center" />
-        </Style>
         <Style Selector="StackPanel.FKeySP">
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="Orientation" Value="Vertical" />
@@ -66,15 +64,21 @@
     <!--<Viewbox Stretch="Uniform" StretchDirection="Both">-->
     <Grid ColumnDefinitions="2*,*,2*" RowDefinitions="2*,30*,2*,3*,3*,5*,4*" Margin="1">
         <!-- Title Bar -->
-        <controls:TitleBar Grid.Column="0" Grid.Row="0" Grid.ColumnSpan="3" Classes="Top" TBLeft="{Binding CurrentTime, Mode=OneWay}"
-                           TBCategory="Outlaw Flat Four" TBRound="Qualifying Round 1" />
+        <controls:TitleBar Grid.Column="0" Grid.Row="0" Grid.ColumnSpan="3" Classes="Top"
+                           TBLeft="{Binding CurrentTime, Mode=OneWay}"
+                           TBCategory="{Binding EngagePairCategText}"
+                           TBRound="{Binding EngagePairModeText}" />
 
         <!-- Left lane timing data -->
         <Grid Grid.Row="1" Grid.Column="0" Margin="1,1,1,1" Background="{DynamicResource DetailBackground}"
-              RowDefinitions="Auto,*,*,*,*,*,*,*,*,*,*,*,*,*,*">
+              RowDefinitions="2*,*,*,*,*,*,*,*,*,*,*,*,*,*,*">
             <controls:CompetitorInfo Grid.Column="0" Grid.Row="0"
-                                     CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET" CIName="Jon Webster"
-                                     CIModel="Mustang" CIBackground="{DynamicResource TitleBackground}" />
+                                     CIRaceNum="{Binding EngagedRacers[0].RaceNumber, FallbackValue=''}"
+                                     CIIndex="{Binding EngagedRacers[0].HandicapIndex, FallbackValue=''}"
+                                     CIClass="{Binding EngagedRacers[0].Class, FallbackValue=''}"
+                                     CIName="{Binding EngagedRacers[0].Name, FallbackValue=''}"
+                                     CIModel="{Binding EngagedRacers[0].Vehicle, FallbackValue=''}"
+                                     CIBackground="{DynamicResource TitleBackground}" />
             <controls:TimingData Grid.Row="1" TimingLabel="Reaction Time" TimingValue="+3.0256" />
             <controls:TimingData Grid.Row="2" TimingLabel="18.288m ET" TimingValue="0.9108" />
             <controls:TimingData Grid.Row="3" TimingLabel="100.584m ET" TimingValue="2.3207" />
@@ -96,7 +100,8 @@
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto"
                   RowDefinitions="*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*">
 
-                <controls:SysStatusLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="SysEng" />
+                <controls:SysStatusLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="SysEng" IsVisible="{Binding SystemEngaged}"/>
+                <controls:SysStatusLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="RunAct" IsVisible="{Binding RunActive}"/>
 
                 <controls:SensorIcon Grid.Row="1" Grid.Column="0" Classes="OK" />
                 <controls:SensorLabel Grid.Row="1" Grid.Column="1" Classes="Enabled"
@@ -186,8 +191,12 @@
         <Grid Grid.Row="1" Grid.Column="2" Margin="1,1,1,1" Background="{DynamicResource DetailBackground}"
               RowDefinitions="Auto,*,*,*,*,*,*,*,*,*,*,*,*,*,*">
             <controls:CompetitorInfo Grid.Column="0" Grid.Row="0"
-                                     CIRaceNum="4189" CIIndex="14.89" CIClass="SP/ET" CIName="Jon Webster"
-                                     CIModel="Mustang" CIBackground="{DynamicResource TitleBackground}" />
+                                     CIRaceNum="{Binding EngagedRacers[1].RaceNumber, FallbackValue=''}"
+                                     CIIndex="{Binding EngagedRacers[1].HandicapIndex, FallbackValue=''}"
+                                     CIClass="{Binding EngagedRacers[1].Class, FallbackValue=''}"
+                                     CIName="{Binding EngagedRacers[1].Name, FallbackValue=''}"
+                                     CIModel="{Binding EngagedRacers[1].Vehicle, FallbackValue=''}"
+                                     CIBackground="{DynamicResource TitleBackground}" />
             <controls:TimingData Grid.Row="1" TimingLabel="Reaction Time" TimingValue="+3.0256" />
             <controls:TimingData Grid.Row="2" TimingLabel="18.288m ET" TimingValue="0.9108" />
             <controls:TimingData Grid.Row="3" TimingLabel="100.584m ET" TimingValue="2.3207" />
@@ -211,11 +220,11 @@
         <!-- Queue Left -->
         <Grid Grid.Row="3" Grid.Column="0" Background="#303030" Margin="1">
             <controls:CompetitorInfo Grid.Column="0" Grid.Row="0"
-                                     CIRaceNum="{Binding LeftQueuePairRacerEntry.RaceNumber, FallbackValue=''}"
-                                     CIIndex="{Binding LeftQueuePairRacerEntry.HandicapIndex, FallbackValue=''}"
-                                     CIClass="{Binding LeftQueuePairRacerEntry.Class, FallbackValue=''}"
-                                     CIName="{Binding LeftQueuePairRacerEntry.Name, FallbackValue=''}"
-                                     CIModel="{Binding LeftQueuePairRacerEntry.Vehicle, FallbackValue=''}"
+                                     CIRaceNum="{Binding QueuedRacers[0].RaceNumber, FallbackValue=''}"
+                                     CIIndex="{Binding QueuedRacers[0].HandicapIndex, FallbackValue=''}"
+                                     CIClass="{Binding QueuedRacers[0].Class, FallbackValue=''}"
+                                     CIName="{Binding QueuedRacers[0].Name, FallbackValue=''}"
+                                     CIModel="{Binding QueuedRacers[0].Vehicle, FallbackValue=''}"
                                      CIBackground="{DynamicResource DetailBackground}" />
         </Grid>
 
@@ -237,11 +246,11 @@
         <!-- Queue Right -->
         <Grid Grid.Row="3" Grid.Column="2" Background="#303030" Margin="1">
             <controls:CompetitorInfo Grid.Column="0" Grid.Row="0"
-                                     CIRaceNum="{Binding RightQueuePairRacerEntry.RaceNumber, FallbackValue=''}"
-                                     CIIndex="{Binding RightQueuePairRacerEntry.HandicapIndex, FallbackValue=''}"
-                                     CIClass="{Binding RightQueuePairRacerEntry.Class, FallbackValue=''}"
-                                     CIName="{Binding RightQueuePairRacerEntry.Name, FallbackValue=''}"
-                                     CIModel="{Binding RightQueuePairRacerEntry.Vehicle, FallbackValue=''}"
+                                     CIRaceNum="{Binding QueuedRacers[1].RaceNumber, FallbackValue=''}"
+                                     CIIndex="{Binding QueuedRacers[1].HandicapIndex, FallbackValue=''}"
+                                     CIClass="{Binding QueuedRacers[1].Class, FallbackValue=''}"
+                                     CIName="{Binding QueuedRacers[1].Name, FallbackValue=''}"
+                                     CIModel="{Binding QueuedRacers[1].Vehicle, FallbackValue=''}"
                                      CIBackground="{DynamicResource DetailBackground}" />
         </Grid>
 
@@ -280,31 +289,37 @@
         <!-- Enter Left -->
         <Grid Grid.Row="5" Grid.Column="0" Background="{DynamicResource DetailBackground}" Margin="1">
             <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" RowDefinitions="*,*" HorizontalAlignment="Center">
-                <Grid.Styles>
-                    <Style Selector="Label">
-                        <Setter Property="Foreground" Value="#F0F0F0" />
-                    </Style>
-                </Grid.Styles>
                 <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #"
                        VerticalContentAlignment="Center" />
-                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="LeftRaceNumBox"
+                <TextBox Grid.Column="1" Grid.Row="0"
+                         FontSize="24" Width="189" Name="LeftRaceNumBox"
                          MaxLength="16" AcceptsReturn="False" TabIndex="0"
-                         Text="{Binding LeftEnterPairRacerEntry.RaceNumber, FallbackValue='', Mode=TwoWay}"
-                         KeyDown="RaceNumBox_OnKeyDown" GotFocus="EnterPairTextBox_OnGotFocus" TextChanged="RaceNumBox_OnTextChanged"/>
+                         Text="{Binding EnterRacers[0].RaceNumber, Mode=TwoWay}"
+                         TextChanged="RaceNumBox_OnTextChanged"
+                         GotFocus="EnterPairTextBox_OnGotFocus" 
+                         KeyDown="RaceNumBox_OnKeyDown">
+
+                    <!-- LostFocus → run command -->
+                    <i:Interaction.Behaviors>
+                        <ia:EventTriggerBehavior EventName="LostFocus">
+                            <ia:InvokeCommandAction Command="{Binding LeftRaceNumConfirmedCommand}" />
+                        </ia:EventTriggerBehavior>
+                    </i:Interaction.Behaviors>
+                </TextBox>
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="LeftIndexBox"
                          Watermark="00.00" TabIndex="1"
                          KeyDown="IndexBox_OnKeyDown"
-                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding LeftEnterPairRacerEntry.HandicapIndex, FallbackValue='00.00', Mode=TwoWay}" />
+                         GotFocus="EnterPairTextBox_OnGotFocus" Text="{Binding EnterRacers[0].HandicapIndex, FallbackValue='00.00', Mode=TwoWay}" />
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
                     <Label Classes="StandardLabel" Name="LeftEnterPairClassLabel"
-                           Content="{Binding LeftEnterPairRacerEntry.Class, FallbackValue='', Mode=OneWay}" />
+                           Content="{Binding EnterRacers[0].Class, FallbackValue='', Mode=OneWay}" />
                     <Label Classes="StandardLabel" Name="LeftEnterPairNameLabel"
-                           Content="{Binding LeftEnterPairRacerEntry.Name, FallbackValue='', Mode=OneWay}" />
+                           Content="{Binding EnterRacers[0].Name, FallbackValue='', Mode=OneWay}" />
                     <Label Classes="StandardLabel" Name="LeftEnterPairVehicleLabel"
-                           Content="{Binding LeftEnterPairRacerEntry.Vehicle, FallbackValue='', Mode=OneWay}" />
+                           Content="{Binding EnterRacers[0].Vehicle, FallbackValue='', Mode=OneWay}" />
                 </StackPanel>
             </Grid>
         </Grid>
@@ -330,11 +345,11 @@
                 <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
                             HorizontalAlignment="Center">
                     <ComboBox Name="LeftTreeComboBox"
-                              SelectedIndex="{Binding LeftEnterPairRacerEntry.Tree, FallbackValue=0, Mode=TwoWay}"
+                              SelectedIndex="{Binding EnterRacers[0].Tree, FallbackValue=0, Mode=TwoWay}"
                               ItemsSource="{Binding TreeList, Mode=OneWay}"/>
                     <Label Classes="StandardLabel" Content="— Tree —" />
                     <ComboBox Name="RightTreeComboBox"
-                              SelectedIndex="{Binding RightEnterPairRacerEntry.Tree, FallbackValue=0, Mode=TwoWay}"
+                              SelectedIndex="{Binding EnterRacers[1].Tree, FallbackValue=0, Mode=TwoWay}"
                               ItemsSource="{Binding TreeList, Mode=OneWay}"/>
                 </StackPanel>
                 <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
@@ -350,32 +365,28 @@
         <!-- Enter Right -->
         <Grid Grid.Row="5" Grid.Column="2" Background="{DynamicResource DetailBackground}" Margin="1">
             <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" RowDefinitions="*,*" HorizontalAlignment="Center">
-                <Grid.Styles>
-                    <Style Selector="Label">
-                        <Setter Property="Foreground" Value="#F0F0F0" />
-                    </Style>
-                </Grid.Styles>
                 <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabelBold" Content="Race #"
                        VerticalContentAlignment="Center" />
-                <TextBox Grid.Column="1" Grid.Row="0" FontSize="24" Width="189" Name="RightRaceNumBox"
-                         MaxLength="16" AcceptsReturn="False" TabIndex="3"
-                         Text="{Binding RightEnterPairRacerEntry.RaceNumber, FallbackValue='', Mode=TwoWay}"
-                         KeyDown="RaceNumBox_OnKeyDown" GotFocus="EnterPairTextBox_OnGotFocus" TextChanged="RaceNumBox_OnTextChanged" />
+                <TextBox Grid.Column="1" Grid.Row="0"
+                         FontSize="24" Width="189" Name="RightRaceNumBox"
+                         MaxLength="16" AcceptsReturn="False" TabIndex="2"
+                         Text="{Binding EnterRacers[1].RaceNumber, Mode=TwoWay}"
+                         TextChanged="RaceNumBox_OnTextChanged" KeyDown="RaceNumBox_OnKeyDown" GotFocus="EnterPairTextBox_OnGotFocus" />
                 <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabelBold" Content="Index" Margin="10,0,0,0"
                        VerticalContentAlignment="Center" />
                 <TextBox Grid.Column="3" Grid.Row="0" FontSize="24" Width="84" MaxLength="5" Name="RightIndexBox"
-                         Watermark="00.00" TabIndex="4"
+                         Watermark="00.00" TabIndex="3"
                          KeyDown="IndexBox_OnKeyDown"
                          GotFocus="EnterPairTextBox_OnGotFocus"
-                         Text="{Binding RightEnterPairRacerEntry.HandicapIndex, FallbackValue='00.00', Mode=TwoWay}" />
+                         Text="{Binding EnterRacers[1].HandicapIndex, FallbackValue='00.00', Mode=TwoWay}" />
                 <StackPanel Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal"
                             HorizontalAlignment="Left">
                     <Label Classes="StandardLabel" Name="RightEnterPairClassLabel"
-                           Content="{Binding RightEnterPairRacerEntry.Class, FallbackValue='', Mode=OneWay}" />
+                           Content="{Binding EnterRacers[1].Class, FallbackValue='', Mode=OneWay}" />
                     <Label Classes="StandardLabel" Name="RightEnterPairNameLabel"
-                           Content="{Binding RightEnterPairRacerEntry.Name, FallbackValue='', Mode=OneWay}" />
+                           Content="{Binding EnterRacers[1].Name, FallbackValue='', Mode=OneWay}" />
                     <Label Classes="StandardLabel" Name="RightEnterPairVehicleLabel"
-                           Content="{Binding RightEnterPairRacerEntry.Vehicle, FallbackValue='', Mode=OneWay}" />
+                           Content="{Binding EnterRacers[1].Vehicle, FallbackValue='', Mode=OneWay}" />
                 </StackPanel>
             </Grid>
         </Grid>
@@ -395,25 +406,25 @@
                     <Label Classes="FKeyText" Content="Re-run" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="2" x:Name="F3Button" Classes="FKey" HotKey="F3">
+            <Button Grid.Column="2" x:Name="F3Button" Classes="FKey" HotKey="F3" Command="{Binding ResetEngagePairCommand}" IsEnabled="{Binding SystemEngaged}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F3" />
                     <Label Classes="FKeyText" Content="Reset" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="3" x:Name="F4Button" Classes="FKey" HotKey="F4">
+            <Button Grid.Column="3" x:Name="F4Button" Classes="FKey" HotKey="F4" Command="{Binding SwapEngagedPairCommand}" IsEnabled="{Binding SystemEngaged}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F4" />
                     <Label Classes="FKeyText" Content="Swap" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="4" x:Name="F5Button" Classes="FKey" HotKey="F5" Command="{Binding QueuePairCommand}">
+            <Button Grid.Column="4" x:Name="F5Button" Classes="FKey" HotKey="F5" Command="{Binding QueuePairCommand}" IsEnabled="{Binding IsF5Enabled}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F5" />
                     <Label Classes="FKeyText" Content="Queue" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="5" x:Name="F6Button" Classes="FKey" HotKey="F6">
+            <Button Grid.Column="5" x:Name="F6Button" Classes="FKey" HotKey="F6" IsEnabled="{Binding SystemEngaged}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F6" />
                     <Label Classes="FKeyText" Content="Start" />
@@ -425,7 +436,7 @@
                     <Label Classes="FKeyText" Content="Setup" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="7" x:Name="F8Button" Classes="FKey" HotKey="F8">
+            <Button Grid.Column="7" x:Name="F8Button" Classes="FKey" HotKey="F8" IsEnabled="{Binding RunActive}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F8" />
                     <Label Classes="FKeyText" Content="Abort" />
@@ -434,16 +445,16 @@
             <Button Grid.Column="8" x:Name="F9Button" Classes="FKey" HotKey="F9">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F9" />
-                    <Label Classes="FKeyText" Content="Swap" />
+                    <Label Classes="FKeyText" Content="Clear" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="9" x:Name="F10Button" Classes="FKey" HotKey="F10">
+            <Button Grid.Column="9" x:Name="F10Button" Classes="FKey" HotKey="F10" Command="{Binding EngagePairCommand}" IsEnabled="{Binding IsF10Enabled}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F10" />
                     <Label Classes="FKeyText" Content="ENGAGE" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="10" x:Name="F11Button" Classes="FKey" HotKey="F11">
+            <Button Grid.Column="10" x:Name="F11Button" Classes="FKey" HotKey="F11" Command="{Binding ClearQueueCommand}" IsEnabled="{Binding IsF11Enabled}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F11" />
                     <Label Classes="FKeyText" Content="Clear Queue" />

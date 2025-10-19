@@ -1,19 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data.Entity.Infrastructure;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
-using System.Threading;
-using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PulsarUI.Models;
 using PulsarUI.Services;
-using System.Timers;
+using System.Windows.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.Input;
-using Timer = System.Timers.Timer;
+using System.Threading.Tasks;
+using Avalonia.Controls.Documents;
+using System.Collections.ObjectModel;
 
 namespace PulsarUI.ViewModels
 {
@@ -23,42 +22,117 @@ namespace PulsarUI.ViewModels
         [ObservableProperty] private string _currentTime;
 
         private readonly DatabaseService _databaseService;
+        
+        private readonly MqttService _mqttService;
+
+        private string? _lastConfirmedRaceNum;
+        
+        public ICommand LeftRaceNumConfirmedCommand { get; }
+        public ICommand RightRaceNumConfirmedCommand { get; }
+        public ICommand LeftIndexConfirmedCommand { get; }
+        public ICommand RightIndexConfirmedCommand { get; }
 
         [GeneratedRegex(@"^(\d{0,2}(\.\d{0,2})?|\.?\d{0,2})?$")]
 
         private static partial Regex IndexPatternRegex();
 
+        [ObservableProperty]
+        private bool _systemEngaged;
+        partial void OnSystemEngagedChanged(bool value)
+        {
+            OnPropertyChanged(nameof(IsF5Enabled));
+            OnPropertyChanged(nameof(IsF10Enabled));
+            OnPropertyChanged(nameof(IsF11Enabled));
+        }
+
+        [ObservableProperty]
+        private bool _runActive;
+        partial void OnRunActiveChanged(bool value)
+        {
+            OnPropertyChanged(nameof(IsF5Enabled));
+            OnPropertyChanged(nameof(IsF10Enabled));
+            OnPropertyChanged(nameof(IsF11Enabled));
+        }
+
         // Category Properties
         [ObservableProperty] private Category? _enterPairCateg;
+        [ObservableProperty] private List<Category?>? _categories;
         [ObservableProperty] private List<string>? _categComboBoxItems;
         [ObservableProperty] private string? _enterPairSelectedCategComboText;
-        [ObservableProperty] private List<Category?>? _categories;
-        [ObservableProperty] private CategQueueItem _enterPairQueueCategory;
+        private CategQueueItem _enterPairQueueCategory;
+        
+        public CategQueueItem EnterPairQueueCategory
+        {
+            get => _enterPairQueueCategory;
+            set
+            {
+                if (_enterPairQueueCategory != null)
+                    _enterPairQueueCategory.PropertyChanged -= EnterPairQueueCategoryHandler;
+                _enterPairQueueCategory = value;
+                if (_enterPairQueueCategory != null)
+                    _enterPairQueueCategory.PropertyChanged += EnterPairQueueCategoryHandler;
+                OnPropertyChanged(nameof(EnterPairQueueCategory));
+            }
+        }
+        
         [ObservableProperty] private string? _enterPairCategText;
-        [ObservableProperty] private CategQueueItem _queuePairQueueCategory;
-        [ObservableProperty] private CategQueueItem _engagedPairQueueCategory;
+        private CategQueueItem _queuePairQueueCategory;
+        
+        public CategQueueItem QueuePairQueueCategory
+        {
+            get => _queuePairQueueCategory;
+            set
+            {
+                if (_queuePairQueueCategory != null)
+                    _queuePairQueueCategory.PropertyChanged -= QueuePairQueueCategoryHandler;
+                _queuePairQueueCategory = value;
+                if (_queuePairQueueCategory != null)
+                    _queuePairQueueCategory.PropertyChanged += QueuePairQueueCategoryHandler;
+                OnPropertyChanged(nameof(QueuePairQueueCategory));
+                // Manually trigger the handler to ensure it fires after assignment
+                QueuePairQueueCategoryHandler(_queuePairQueueCategory, new PropertyChangedEventArgs(""));
+            }
+        }
         [ObservableProperty] private string? _queuePairCategText;
+        private CategQueueItem _engagePairQueueCategory;
+        public CategQueueItem EngagePairQueueCategory
+        {
+            get => _engagePairQueueCategory;
+            set
+            {
+                if (_engagePairQueueCategory != null)
+                    _engagePairQueueCategory.PropertyChanged -= EngagePairQueueCategoryHandler;
+                _engagePairQueueCategory = value;
+                if (_engagePairQueueCategory != null)
+                    _engagePairQueueCategory.PropertyChanged += EngagePairQueueCategoryHandler;
+                OnPropertyChanged(nameof(EngagePairQueueCategory));
+                // Manually trigger the handler to ensure it fires after assignment
+                EngagePairQueueCategoryHandler(_engagePairQueueCategory, new PropertyChangedEventArgs(""));
+            }
+        }
+        [ObservableProperty] private string? _engagePairCategText;
 
         // Race Mode Properties
         [ObservableProperty] private List<string> _modeList;
         [ObservableProperty] private string? _queuePairModeText;
+        [ObservableProperty] private string? _engagePairModeText;
 
         // Tree Type Properties
         [ObservableProperty] private List<string> _treeList;
         [ObservableProperty] private string? _queuePairLeftTreeText;
         [ObservableProperty] private string? _queuePairRightTreeText;
+        [ObservableProperty] private string? _engagePairLeftTreeText;
+        [ObservableProperty] private string? _engagePairRightTreeText;
 
         // Finish Line Properties
         [ObservableProperty] private List<string?> _finishList;
         [ObservableProperty] private string? _queuePairFinishText;
+        [ObservableProperty] private string? _engagePairFinishText;
 
         // Racer Info Properties
-        [ObservableProperty] private RaceEntry? _leftEnterPairRacerEntry;
-        [ObservableProperty] private RaceEntry? _rightEnterPairRacerEntry;
-        [ObservableProperty] private RaceEntry? _leftQueuePairRacerEntry;
-        [ObservableProperty] private RaceEntry? _rightQueuePairRacerEntry;
-        [ObservableProperty] private RaceEntry? _leftEngagePairRacerEntry;
-        [ObservableProperty] private RaceEntry? _rightEngagePairRacerEntry;
+        public ObservableCollection<RaceEntry> EnterRacers { get; } = new ObservableCollection<RaceEntry> { new RaceEntry { Lane = 0, QueueIndex = 0 }, new RaceEntry { Lane = 1, QueueIndex = 0 } };
+        public ObservableCollection<RaceEntry> QueuedRacers { get; } = new ObservableCollection<RaceEntry> { new RaceEntry { Lane = 0, QueueIndex = 1 }, new RaceEntry { Lane = 1, QueueIndex = 1 } };
+        public ObservableCollection<RaceEntry> EngagedRacers { get; } = new ObservableCollection<RaceEntry> { new RaceEntry { Lane = 0, QueueIndex = 2 }, new RaceEntry { Lane = 1, QueueIndex = 2 } };
 
         public MainWindowViewModel()
         {
@@ -72,6 +146,9 @@ namespace PulsarUI.ViewModels
             _ = LoadFinishLinesAsync();
             _ = LoadTreeTypesAsync();
             _ = LoadCategoriesAsync();
+            
+            _mqttService = new MqttService();
+            _ = LoadCategoriesAsync();
 
             EnterPairQueueCategory = new CategQueueItem
             {
@@ -84,71 +161,22 @@ namespace PulsarUI.ViewModels
             };
 
             EnterPairQueueCategory.PropertyChanged += EnterPairQueueCategoryHandler;
+            // Attach handlers for the other two CategQueueItems
+            if (QueuePairQueueCategory != null)
+                QueuePairQueueCategory.PropertyChanged += QueuePairQueueCategoryHandler;
+            if (EngagePairQueueCategory != null)
+                EngagePairQueueCategory.PropertyChanged += EngagePairQueueCategoryHandler;
+
             EnterPairSelectedCategComboText = CategComboBoxItems?.FirstOrDefault();
 
-            LeftEnterPairRacerEntry = new RaceEntry
-            {
-                Category = 0,
-                Class = "",
-                HandicapIndex = "00.00",
-                Lane = 0,
-                Name = "",
-                QueueIndex = 0,
-                RaceNumber = "",
-                Tree = 0,
-                Vehicle = ""
-            };
-            LeftEnterPairRacerEntry.PropertyChanged += EnterPairRacerEntryHandler;
+            foreach (var racer in EnterRacers)
+                racer.PropertyChanged += EnterPairRacerEntryHandler;
+            foreach (var racer in QueuedRacers)
+                racer.PropertyChanged += QueuePairRacerEntry_PropertyChanged;
+            // EngagedRacers can have a handler if needed
 
-            RightEnterPairRacerEntry = new RaceEntry
-            {
-                Category = 0,
-                Class = "",
-                HandicapIndex = "00.00",
-                Lane = 1,
-                Name = "",
-                QueueIndex = 0,
-                RaceNumber = "",
-                Tree = 0,
-                Vehicle = ""
-            };
-            RightEnterPairRacerEntry.PropertyChanged += EnterPairRacerEntryHandler;
-
-            QueuePairQueueCategory = new CategQueueItem
-            {
-                QueueIndex = 1,
-                Category = 1,
-                Finish = 0,
-                Mode = 0,
-                Round = 1,
-                LastRound = 0
-            };
-            
-            LeftQueuePairRacerEntry = new RaceEntry
-            {
-                Category = 0,
-                Class = "",
-                HandicapIndex = "00.00",
-                Lane = 0,
-                Name = "",
-                QueueIndex = 1,
-                RaceNumber = "",
-                Tree = 0,
-                Vehicle = ""
-            };
-            
-            RightQueuePairRacerEntry = new RaceEntry
-            {
-                Category = 0,
-                Class = "",
-                HandicapIndex = "00.00",
-                Lane = 1,
-                Name = "",
-                QueueIndex = 1,
-                RaceNumber = "",
-                Tree = 0,
-                Vehicle = ""
-            };
+            EnterPairRacerEntryHandler(EnterRacers[0], new PropertyChangedEventArgs(nameof(RaceEntry.RaceNumber)));
+            EnterPairRacerEntryHandler(EnterRacers[1], new PropertyChangedEventArgs(nameof(RaceEntry.RaceNumber)));
 
             ModeList =
             [
@@ -157,6 +185,63 @@ namespace PulsarUI.ViewModels
                 "Eliminations",
                 "Q+E Combo"
             ];
+
+            LeftRaceNumConfirmedCommand = new RelayCommand(async () =>
+            {
+                var raceNum = EnterRacers[0]?.RaceNumber;
+
+                if (!string.IsNullOrWhiteSpace(raceNum) && raceNum != _lastConfirmedRaceNum)
+                {
+                    _lastConfirmedRaceNum = raceNum;
+                    // Fire your existing MQTT handler (which builds JSON from the model)
+                    if (EnterRacers[0] != null)
+                        await _mqttService.PubQueueRacersAsync(EnterRacers[0]);
+                }
+                // Ensure F5 updates after confirming
+                OnPropertyChanged(nameof(IsF5Enabled));
+            });
+
+            RightRaceNumConfirmedCommand = new RelayCommand(async () =>
+            {
+                var raceNum = EnterRacers[1]?.RaceNumber;
+
+                if (!string.IsNullOrWhiteSpace(raceNum) && raceNum != _lastConfirmedRaceNum)
+                {
+                    _lastConfirmedRaceNum = raceNum;
+                    if (EnterRacers[1] != null)
+                        await _mqttService.PubQueueRacersAsync(EnterRacers[1]);
+                }
+                // Ensure F5 updates after confirming
+                OnPropertyChanged(nameof(IsF5Enabled));
+            });
+
+            LeftIndexConfirmedCommand = new RelayCommand(async () =>
+            {
+                if (EnterRacers[0] != null)
+                    await _mqttService.PubQueueRacersAsync(EnterRacers[0]);
+            });
+
+            RightIndexConfirmedCommand = new RelayCommand(async () =>
+            {
+                if (EnterRacers[1] != null)
+                    await _mqttService.PubQueueRacersAsync(EnterRacers[1]);
+            });
+        }
+
+        // Stub for missing event handler to fix compile error
+        private void QueuePairRacerEntry_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(RaceEntry.RaceNumber) ||
+                e.PropertyName == nameof(RaceEntry.HandicapIndex) ||
+                e.PropertyName == nameof(RaceEntry.Class) ||
+                e.PropertyName == nameof(RaceEntry.Name) ||
+                e.PropertyName == nameof(RaceEntry.Vehicle))
+            {
+                OnPropertyChanged(nameof(IsF5Enabled));
+                OnPropertyChanged(nameof(IsF10Enabled));
+                OnPropertyChanged(nameof(IsF11Enabled));
+            }
+            // TODO: Implement logic if needed
         }
 
         private void StartClock()
@@ -169,46 +254,72 @@ namespace PulsarUI.ViewModels
             _clockTimer.Start();
         }
 
+        private CategQueueItem? _lastSentEnterPairQueueCategory;
+        private CategQueueItem? _lastSentQueuePairQueueCategory;
+        private CategQueueItem? _lastSentEngagePairQueueCategory;
+
+        private bool IsCategQueueItemDifferent(CategQueueItem? a, CategQueueItem? b)
+        {
+            if (a == null || b == null) return true;
+            return a.QueueIndex != b.QueueIndex ||
+                   a.Category != b.Category ||
+                   a.Finish != b.Finish ||
+                   a.Mode != b.Mode ||
+                   a.Round != b.Round ||
+                   a.LastRound != b.LastRound;
+        }
+
         private void EnterPairQueueCategoryHandler(object? sender, PropertyChangedEventArgs e)
         {
-            EnterPairQueueCategory.PropertyChanged -= EnterPairQueueCategoryHandler;
-            switch (e.PropertyName)
+            if (EnterPairQueueCategory == null)
+                return;
+            if (IsCategQueueItemDifferent(EnterPairQueueCategory, _lastSentEnterPairQueueCategory))
             {
-                case nameof(CategQueueItem.Category):
-                {
-                    var category = Categories?.Find(c => c?.CategoryId == EnterPairQueueCategory.Category);
-
-                    if (category == null) return;
-
-                    if (category.CategoryFinish != null)
-                    {
-                        EnterPairQueueCategory.Finish = FinishList.IndexOf(category.CategoryFinish);
-                    }
-
-                    if (category.CategoryTreeType != null && RightEnterPairRacerEntry != null &&
-                        LeftEnterPairRacerEntry != null)
-                    {
-                        LeftEnterPairRacerEntry.Tree =
-                            RightEnterPairRacerEntry.Tree = TreeList.IndexOf(category.CategoryTreeType);
-                    }
-
-                    EnterPairQueueCategory.Mode = category.LastMode;
-                    EnterPairQueueCategory.LastRound = category.LastRound;
-                    EnterPairQueueCategory.Round = category.LastRound + (category.LastRound == 0 ? 1 : 0);
-
-                    EnterPairCategText = category.CategoryName;
-                    EnterPairSelectedCategComboText =
-                        category.CategoryOrder.ToString("D2") + " - " + category.CategoryName;
-                    break;
-                }
+                _ = _mqttService.PubQueueCategAsync(EnterPairQueueCategory);
+                _lastSentEnterPairQueueCategory = EnterPairQueueCategory.Clone(EnterPairQueueCategory.QueueIndex);
             }
+        }
 
-            EnterPairQueueCategory.PropertyChanged += EnterPairQueueCategoryHandler;
-            _ = _databaseService.WriteQueueCategoriesAsync(EnterPairQueueCategory);
+        private void QueuePairQueueCategoryHandler(object? sender, PropertyChangedEventArgs e)
+        {
+            if (QueuePairQueueCategory == null)
+                return;
+            if (IsCategQueueItemDifferent(QueuePairQueueCategory, _lastSentQueuePairQueueCategory))
+            {
+                _ = _mqttService.PubQueueCategAsync(QueuePairQueueCategory);
+                _lastSentQueuePairQueueCategory = QueuePairQueueCategory.Clone(QueuePairQueueCategory.QueueIndex);
+            }
+        }
+
+        private void EngagePairQueueCategoryHandler(object? sender, PropertyChangedEventArgs e)
+        {
+            if (EngagePairQueueCategory == null)
+                return;
+            if (IsCategQueueItemDifferent(EngagePairQueueCategory, _lastSentEngagePairQueueCategory))
+            {
+                _ = _mqttService.PubQueueCategAsync(EngagePairQueueCategory);
+                _lastSentEngagePairQueueCategory = EngagePairQueueCategory.Clone(EngagePairQueueCategory.QueueIndex);
+            }
         }
 
         private void EnterPairRacerEntryHandler(object? sender, PropertyChangedEventArgs e)
         {
+            if (e.PropertyName == nameof(RaceEntry.RaceNumber) ||
+                e.PropertyName == nameof(RaceEntry.HandicapIndex) ||
+                e.PropertyName == nameof(RaceEntry.Class) ||
+                e.PropertyName == nameof(RaceEntry.Name) ||
+                e.PropertyName == nameof(RaceEntry.Vehicle))
+            {
+                OnPropertyChanged(nameof(IsF5Enabled));
+                OnPropertyChanged(nameof(IsF10Enabled));
+                OnPropertyChanged(nameof(IsF11Enabled));
+            }
+            // Send Tree value over MQTT when it changes
+            if (e.PropertyName == nameof(RaceEntry.Tree) && sender is RaceEntry raceEntry)
+            {
+                // Publish the updated RaceEntry, including the new Tree value
+                _ = _mqttService?.PubQueueRacersAsync(raceEntry);
+            }
             _ = EnterPairRacerEntryHandlerAsync(sender, e);
         }
 
@@ -218,12 +329,12 @@ namespace PulsarUI.ViewModels
             switch (raceEntry.Lane)
             {
                 case 0:
-                    if (LeftEnterPairRacerEntry == null) return;
-                    LeftEnterPairRacerEntry.PropertyChanged -= EnterPairRacerEntryHandler;
+                    if (EnterRacers[0] == null) return;
+                    EnterRacers[0].PropertyChanged -= EnterPairRacerEntryHandler;
                     break;
                 case 1:
-                    if (RightEnterPairRacerEntry == null) return;
-                    RightEnterPairRacerEntry.PropertyChanged -= EnterPairRacerEntryHandler;
+                    if (EnterRacers[1] == null) return;
+                    EnterRacers[1].PropertyChanged -= EnterPairRacerEntryHandler;
                     break;
             }
             
@@ -244,23 +355,26 @@ namespace PulsarUI.ViewModels
             switch (raceEntry.Lane)
             {
                 case 0:
-                    LeftEnterPairRacerEntry = raceEntry;
-                    LeftEnterPairRacerEntry.PropertyChanged += EnterPairRacerEntryHandler;
+                    EnterRacers[0] = raceEntry;
+                    EnterRacers[0].PropertyChanged += EnterPairRacerEntryHandler;
                     break;
                 case 1:
-                    RightEnterPairRacerEntry = raceEntry;
-                    RightEnterPairRacerEntry.PropertyChanged += EnterPairRacerEntryHandler;
+                    EnterRacers[1] = raceEntry;
+                    EnterRacers[1].PropertyChanged += EnterPairRacerEntryHandler;
                     break;
             }
-            await _databaseService.WriteQueueRacersAsync(raceEntry);
         }
         partial void OnEnterPairSelectedCategComboTextChanged(string? text)
         {
             if (EnterPairSelectedCategComboText == null || Categories == null) return;
-            var categoryOrder = int.Parse(EnterPairSelectedCategComboText[..2]);
-
-            EnterPairQueueCategory.Category = Categories
-                .FirstOrDefault(c => c != null && c.CategoryOrder == categoryOrder)?.CategoryId ?? 0;
+            // Parse the category name from the ComboBox string (format: "01 - Sportsman ET")
+            var split = EnterPairSelectedCategComboText.Split(" - ", 2);
+            if (split.Length < 2) return;
+            var categoryName = split[1].Trim();
+            var category = Categories.FirstOrDefault(c => c != null && c.CategoryName == categoryName);
+            if (category == null) return;
+            EnterPairQueueCategory.Category = category.CategoryId;
+            EnterPairCategText = category.CategoryName;
         }
 
         [RelayCommand]
@@ -270,51 +384,153 @@ namespace PulsarUI.ViewModels
             if (category == null) return;
             QueuePairCategText = category.CategoryName;
             QueuePairFinishText = FinishList[EnterPairQueueCategory.Finish];
-            QueuePairModeText = ModeList[EnterPairQueueCategory.Mode] + " Round " +
-                                EnterPairQueueCategory.Round;
-            if (LeftEnterPairRacerEntry != null) QueuePairLeftTreeText = TreeList[LeftEnterPairRacerEntry.Tree];
-            if (RightEnterPairRacerEntry != null) QueuePairRightTreeText = TreeList[RightEnterPairRacerEntry.Tree];
-
+            QueuePairModeText = ModeList[EnterPairQueueCategory.Mode] + " Round " + EnterPairQueueCategory.Round;
             QueuePairQueueCategory = EnterPairQueueCategory.Clone(1);
-            //reset tree types to category default in LeftEnterPairRacerEntry and RightEnterPairRacerEntry
-
-            EnterPairQueueCategory.Mode = category.LastMode;
-            EnterPairQueueCategory.LastRound = category.LastRound;
-            EnterPairQueueCategory.Round = category.LastRound + (category.LastRound == 0 ? 1 : 0);
-
             EnterPairCategText = category.CategoryName;
-
-            if (LeftEnterPairRacerEntry != null)
+            for (int i = 0; i < EnterRacers.Count; i++)
             {
-                LeftQueuePairRacerEntry = LeftEnterPairRacerEntry?.Clone(1);
-                LeftEnterPairRacerEntry.ClearDetails();
-                LeftEnterPairRacerEntry.RaceNumber = "";
+                QueuedRacers[i] = EnterRacers[i].Clone(1);
+                EnterRacers[i].ClearAll();
             }
-            else
+            // Send MQTT nulls for EnterPair
+            for (int i = 0; i < EnterRacers.Count; i++)
+                _ = _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 0, Lane = i });
+            foreach (var racer in QueuedRacers)
             {
-                LeftQueuePairRacerEntry = new RaceEntry();
+                _ = _mqttService.PubQueueRacersAsync(racer);
             }
-
-            if (RightEnterPairRacerEntry != null)
-            {
-                RightQueuePairRacerEntry = RightEnterPairRacerEntry?.Clone(1);
-                RightEnterPairRacerEntry.ClearDetails();
-                RightEnterPairRacerEntry.RaceNumber = "";
-            }
-            else
-            {
-                RightQueuePairRacerEntry = new RaceEntry();
-            }
-
-            _ = _databaseService.WriteQueueCategoriesAsync(QueuePairQueueCategory);
-            if (LeftQueuePairRacerEntry != null) _ = _databaseService.WriteQueueRacersAsync(LeftQueuePairRacerEntry);
-            if (RightQueuePairRacerEntry != null) _ = _databaseService.WriteQueueRacersAsync(RightQueuePairRacerEntry);
+            OnPropertyChanged(nameof(IsF5Enabled));
+            OnPropertyChanged(nameof(IsF10Enabled));
+            OnPropertyChanged(nameof(IsF11Enabled));
         }
+
+        [RelayCommand]
+        private void EngagePair()
+        {
+            bool queueHasEntries = QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
+            for (int i = 0; i < EngagedRacers.Count; i++)
+            {
+                EngagedRacers[i] = queueHasEntries
+                    ? QueuedRacers[i].Clone(2)
+                    : EnterRacers[i].Clone(2);
+                _ = _mqttService.PubQueueRacersAsync(EngagedRacers[i]);
+            }
+            for (int i = 0; i < QueuedRacers.Count; i++)
+            {
+                // Publish an explicit queuedpair null entry to clear subscribers' queued pair
+                _ = _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 1, Lane = i, RaceNumber = null, HandicapIndex = null });
+                // Then clear the local queued entry
+                QueuedRacers[i].ClearAll();
+            }
+            Category? category;
+            if (queueHasEntries)
+            {
+                category = Categories?.Find(c => c?.CategoryId == QueuePairQueueCategory.Category);
+                EngagePairQueueCategory = QueuePairQueueCategory.Clone(2);
+            }
+            else
+            {
+                category = Categories?.Find(c => c?.CategoryId == EnterPairQueueCategory.Category);
+                EngagePairQueueCategory = EnterPairQueueCategory.Clone(2);
+                for (int i = 0; i < EnterRacers.Count; i++)
+                {
+                    EnterRacers[i].ClearAll();
+                    _ = _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 0, Lane = i });
+                }
+                OnPropertyChanged(nameof(IsF5Enabled));
+            }
+            if (category == null) return;
+            EngagePairCategText = category.CategoryName;
+            SystemEngaged = true;
+            OnPropertyChanged(nameof(IsF10Enabled));
+        }
+
+        [RelayCommand]
+        private void ResetEngagePair()
+        {
+            SystemEngaged = false;
+            OnPropertyChanged(nameof(IsF10Enabled));
+            foreach (var racer in EngagedRacers)
+                racer.ClearAll();
+            OnPropertyChanged(nameof(IsF5Enabled));
+            OnPropertyChanged(nameof(IsF10Enabled));
+            OnPropertyChanged(nameof(IsF11Enabled));
+        }
+
+        [RelayCommand]
+        private void SwapEngagedPair()
+        {
+            // Ensure collection has two slots; if missing, add empty placeholders
+            while (EngagedRacers.Count < 2)
+            {
+                EngagedRacers.Add(new RaceEntry { QueueIndex = 2, Lane = EngagedRacers.Count });
+            }
+
+            // Capture current entries (may contain null/empty RaceNumber)
+            var left = EngagedRacers[0];
+            var right = EngagedRacers[1];
+
+            // Swap their data: create clones to avoid mutating original objects in unexpected ways
+            var swappedLeft = (right != null) ? right.Clone(2) : new RaceEntry { QueueIndex = 2, Lane = 0 };
+            var swappedRight = (left != null) ? left.Clone(2) : new RaceEntry { QueueIndex = 2, Lane = 1 };
+
+            // Ensure lanes are correct after swap
+            swappedLeft.Lane = 0;
+            swappedRight.Lane = 1;
+
+            // Assign swapped entries back to the collection
+            EngagedRacers[0] = swappedLeft;
+            EngagedRacers[1] = swappedRight;
+
+            // Publish the updated engaged pair to MQTT so subscribers see the swap (left then right)
+            _ = _mqttService.PubQueueRacersAsync(EngagedRacers[0]);
+            _ = _mqttService.PubQueueRacersAsync(EngagedRacers[1]);
+
+            // Notify bindings that engaged racers changed
+            OnPropertyChanged(nameof(EngagedRacers));
+        }
+
+        [RelayCommand]
+        private async Task ClearQueue()
+        {
+            foreach (var racer in QueuedRacers)
+                racer.ClearAll();
+            for (int i = 0; i < QueuedRacers.Count; i++)
+                await _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 1, Lane = i });
+            OnPropertyChanged(nameof(IsF5Enabled));
+            OnPropertyChanged(nameof(IsF10Enabled));
+            OnPropertyChanged(nameof(IsF11Enabled));
+        }
+
+        public async Task ClearEnterPairQueue()
+        {
+            foreach (var racer in EnterRacers)
+                racer.ClearAll();
+            for (int i = 0; i < EnterRacers.Count; i++)
+                await _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 0, Lane = i });
+            OnPropertyChanged(nameof(IsF5Enabled));
+            OnPropertyChanged(nameof(IsF10Enabled));
+            OnPropertyChanged(nameof(IsF11Enabled));
+        }
+
+        public async Task ClearEngagePairQueue()
+        {
+            foreach (var racer in EngagedRacers)
+                racer.ClearAll();
+            for (int i = 0; i < EngagedRacers.Count; i++)
+                await _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 2, Lane = i });
+            OnPropertyChanged(nameof(IsF5Enabled));
+            OnPropertyChanged(nameof(IsF10Enabled));
+            OnPropertyChanged(nameof(IsF11Enabled));
+        }
+        
         private async Task LoadCategoriesAsync()
         {
             Categories = await _databaseService.GetCategoryListAsync();
-            
+
             CategComboBoxItems = Categories.Select(c => c != null ? $"{(c.CategoryOrder.ToString("D2"))} - {c.CategoryName}" : null).ToList();
+
+            await _mqttService.PublishMqtt("pulsarui/sysmsg","Loading categories...");
         }
 
         private async Task LoadTreeTypesAsync()
@@ -326,6 +542,21 @@ namespace PulsarUI.ViewModels
         {
             FinishList = await _databaseService.GetFinishLinesAsync();
         }
+
+        // F5 (Queue) is enabled if any EnterRacers have a RaceNumber and all QueuedRacers are empty
+        public bool IsF5Enabled =>
+            EnterRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber)) &&
+            QueuedRacers.All(r => string.IsNullOrEmpty(r.RaceNumber));
+
+        // F10 (Engage) is enabled if there are queued or entered racers, and system is not engaged or running
+        public bool IsF10Enabled =>
+            (QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber)) ||
+             EnterRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber))) &&
+            !SystemEngaged &&
+            !RunActive;
+
+        // F11 (Clear Queue) is enabled only when any QueuedRacers have a RaceNumber
+        public bool IsF11Enabled =>
+            QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
     }
-    
 }
