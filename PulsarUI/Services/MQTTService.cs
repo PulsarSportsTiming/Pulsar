@@ -96,7 +96,16 @@ namespace PulsarUI.Services
                 tree = entry.Tree
             });
 
-            return PublishMqtt(topic, payloadJson);
+            // Publish the minimal payload as before
+            var publishMain = PublishMqtt(topic, payloadJson);
+
+            // Also publish a detailed payload on the ".../detail" topic with all properties (camelCase)
+            var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+            var detailPayload = JsonSerializer.Serialize(entry, options);
+            var detailTopic = topic + "/detail";
+            var publishDetail = PublishMqtt(detailTopic, detailPayload);
+
+            return Task.WhenAll(publishMain, publishDetail);
         }
 
         public Task PubQueueCategAsync(CategQueueItem categ)
@@ -122,7 +131,16 @@ namespace PulsarUI.Services
                 finish = categ.Finish
             });
 
-            return PublishMqtt(topic, payloadJson);
+            // Publish the minimal payload as before
+            var publishMain = PublishMqtt(topic, payloadJson);
+
+            // Also publish a detailed payload on the ".../detail" topic with all properties (camelCase)
+            var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+            var detailPayload = JsonSerializer.Serialize(categ, options);
+            var detailTopic = topic + "/detail";
+            var publishDetail = PublishMqtt(detailTopic, detailPayload);
+
+            return Task.WhenAll(publishMain, publishDetail);
         }
     }
 }

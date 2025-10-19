@@ -10,6 +10,7 @@ public partial class CategQueueItem : ObservableObject
     [ObservableProperty] private int _round;
     [ObservableProperty] private int _lastRound;
     [ObservableProperty] private int _finish;
+    [ObservableProperty] private Category _categoryDetails = new Category();
 
     public void ClearDetails()
     {
@@ -19,6 +20,7 @@ public partial class CategQueueItem : ObservableObject
         Round = 0;
         LastRound = 0;
         Finish = 0;
+        CategoryDetails = new Category();
     }
     public CategQueueItem Clone(int queueIndex)
     {
@@ -29,7 +31,8 @@ public partial class CategQueueItem : ObservableObject
             Mode = this.Mode,
             Round = this.Round,
             LastRound = this.LastRound,
-            Finish = this.Finish
+            Finish = this.Finish,
+            CategoryDetails = this.CategoryDetails
         };
     }
 }

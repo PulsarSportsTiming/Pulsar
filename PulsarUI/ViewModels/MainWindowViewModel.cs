@@ -78,7 +78,7 @@ namespace PulsarUI.ViewModels
         }
 
         [ObservableProperty] private string? _enterPairCategText;
-        private CategQueueItem _queuePairQueueCategory = default!;
+        private CategQueueItem _queuePairQueueCategory = null!;
 
         public CategQueueItem QueuePairQueueCategory
         {
@@ -235,13 +235,14 @@ namespace PulsarUI.ViewModels
             EnterPairRacerEntryHandler(EnterRacers[0], new PropertyChangedEventArgs(nameof(RaceEntry.RaceNumber)));
             EnterPairRacerEntryHandler(EnterRacers[1], new PropertyChangedEventArgs(nameof(RaceEntry.RaceNumber)));
 
-            ModeList =
-            [
+            // Initialize runtime ModeList (correct C# List initializer)
+            ModeList = new List<string>
+            {
                 "Practice",
                 "Qualifying",
                 "Eliminations",
                 "Q+E Combo"
-            ];
+            };
 
             LeftRaceNumConfirmedCommand = new RelayCommand(async () =>
             {
@@ -336,6 +337,10 @@ namespace PulsarUI.ViewModels
         private CategQueueItem? _lastSentQueuePairQueueCategory;
         private CategQueueItem? _lastSentEngagePairQueueCategory;
 
+        // When true, EnterPairQueueCategoryHandler will suppress publishing to MQTT so
+        // we can make several programmatic changes and then publish once explicitly.
+        private bool _suppressCategPublish = false;
+
         private bool IsCategQueueItemDifferent(CategQueueItem? a, CategQueueItem? b)
         {
             if (a == null || b == null) return true;
@@ -359,10 +364,22 @@ namespace PulsarUI.ViewModels
                     : FinishList.FirstOrDefault();
             }
 
+            // Ensure CategoryDetails is attached when the Category id changes or the categories list is available
+            if (Categories != null && Categories.Count > 0)
+            {
+                var cat = Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory.Category);
+                if (cat != null)
+                    EnterPairQueueCategory.CategoryDetails = cat;
+            }
+
             if (IsCategQueueItemDifferent(EnterPairQueueCategory, _lastSentEnterPairQueueCategory))
             {
-                _ = _mqttService.PubQueueCategAsync(EnterPairQueueCategory);
-                _lastSentEnterPairQueueCategory = EnterPairQueueCategory.Clone(EnterPairQueueCategory.QueueIndex);
+                // If suppression is active we skip publishing here — a single publish will be done by the caller
+                if (!_suppressCategPublish)
+                {
+                    _ = _mqttService.PubQueueCategAsync(EnterPairQueueCategory);
+                    _lastSentEnterPairQueueCategory = EnterPairQueueCategory.Clone(EnterPairQueueCategory.QueueIndex);
+                }
             }
         }
 
@@ -466,15 +483,62 @@ namespace PulsarUI.ViewModels
         }
         partial void OnEnterPairSelectedCategComboTextChanged(string? value)
         {
-            if (EnterPairSelectedCategComboText == null || Categories == null) return;
-            // Parse the category name from the ComboBox string (format: "01 - Sportsman ET")
-            var split = EnterPairSelectedCategComboText.Split(" - ", 2);
-            if (split.Length < 2) return;
-            var categoryName = split[1].Trim();
-            var category = Categories.FirstOrDefault(c => c != null && c.Name == categoryName);
+            if (string.IsNullOrWhiteSpace(EnterPairSelectedCategComboText) || Categories == null || EnterPairQueueCategory == null) return;
+            // ComboBox items are formatted as "01 - CategoryName" and the leading two characters are derived from Category.Order (UNIQUE, NOT NULL)
+            var text = EnterPairSelectedCategComboText.TrimStart();
+            if (text.Length < 2) return;
+            if (!int.TryParse(text.Substring(0, 2), out var order)) return;
+            var category = Categories.FirstOrDefault(c => c.Order == order);
             if (category == null) return;
+
+            // Suppress automatic category publishes while we update dependent fields (trees/finish)
+            _suppressCategPublish = true;
+
+            // Attach details and set numeric category id
             EnterPairQueueCategory.Category = category.Id;
+            EnterPairQueueCategory.CategoryDetails = category;
             EnterPairCategText = category.Name;
+
+            // Set Mode/LastRound from category (LastMode maps to ModeList indices)
+            if (ModeList != null && ModeList.Count > 0)
+            {
+                var lm = category.LastMode;
+                if (lm >= 0 && lm < ModeList.Count)
+                    EnterPairQueueCategory.Mode = lm;
+                else
+                    EnterPairQueueCategory.Mode = 0;
+            }
+            // Store LastRound on the queue item (don't overwrite current Round unless you prefer)
+            EnterPairQueueCategory.LastRound = category.LastRound;
+
+            // Set left/right tree selections to the TreeType associated with the selected category (if available)
+            if (TreeList != null && TreeList.Count > 0)
+            {
+                var treeType = TreeList.FirstOrDefault(t => t != null && t.Id == category.TreeType);
+                if (treeType != null)
+                {
+                    SelectedLeftTree = treeType;
+                    SelectedRightTree = treeType;
+                }
+            }
+
+            // Also set the selected finish line to the FinishLine associated with the selected category (if available)
+            if (FinishList != null && FinishList.Count > 0)
+            {
+                var finishLine = FinishList.FirstOrDefault(f => f != null && f.Id == category.Finish);
+                if (finishLine != null)
+                {
+                    SelectedFinishLine = finishLine;
+                }
+            }
+
+            // Re-enable publishes and send a single consolidated category message
+            _suppressCategPublish = false;
+            if (IsCategQueueItemDifferent(EnterPairQueueCategory, _lastSentEnterPairQueueCategory))
+            {
+                _ = _mqttService.PubQueueCategAsync(EnterPairQueueCategory);
+                _lastSentEnterPairQueueCategory = EnterPairQueueCategory.Clone(EnterPairQueueCategory.QueueIndex);
+            }
         }
 
         [RelayCommand]
@@ -483,8 +547,13 @@ namespace PulsarUI.ViewModels
             var category = Categories?.Find(c => c?.Id == EnterPairQueueCategory.Category);
             if (category == null) return;
             QueuePairCategText = category.Name;
-            QueuePairFinishText = "holla";// FinishList[EnterPairQueueCategory.Finish];
-            QueuePairModeText = ModeList[EnterPairQueueCategory.Mode] + " Round " + EnterPairQueueCategory.Round;
+            // Populate textual finish and mode safely (avoid using commented-out stubs)
+            QueuePairFinishText = (FinishList != null && EnterPairQueueCategory != null && EnterPairQueueCategory.Finish >= 0 && EnterPairQueueCategory.Finish < FinishList.Count)
+                ? FinishList[EnterPairQueueCategory.Finish].Description
+                : string.Empty;
+            QueuePairModeText = (ModeList != null && EnterPairQueueCategory != null && EnterPairQueueCategory.Mode >= 0 && EnterPairQueueCategory.Mode < ModeList.Count)
+                ? ModeList[EnterPairQueueCategory.Mode] + " Round " + EnterPairQueueCategory.Round
+                : (ModeList.FirstOrDefault() ?? string.Empty) + " Round " + EnterPairQueueCategory.Round;
             QueuePairQueueCategory = EnterPairQueueCategory.Clone(1);
             EnterPairCategText = category.Name;
             for (int i = 0; i < EnterRacers.Count; i++)
@@ -624,6 +693,9 @@ namespace PulsarUI.ViewModels
                 .Select(c => $"{c.Order.ToString("D2")} - {c.Name}")
                 .ToList();
 
+            // Ensure the selected combo text is initialized now that the category items exist
+            EnterPairSelectedCategComboText = CategComboBoxItems.FirstOrDefault();
+
             await _mqttService.PublishMqtt("pulsarui/sysmsg","Loading categories...");
         }
 
@@ -633,6 +705,19 @@ namespace PulsarUI.ViewModels
             // Initialize SelectedLeftTree/SelectedRightTree from existing EnterRacers' Tree indices
             if (TreeList != null && TreeList.Count > 0)
             {
+                // If a category is already selected and has a TreeType, prefer that
+                if (EnterPairQueueCategory?.CategoryDetails != null)
+                {
+                    var ct = EnterPairQueueCategory.CategoryDetails.TreeType;
+                    var treeById = TreeList.FirstOrDefault(t => t.Id == ct);
+                    if (treeById != null)
+                    {
+                        SelectedLeftTree = treeById;
+                        SelectedRightTree = treeById;
+                        return;
+                    }
+                }
+
                 if (EnterRacers.Count > 0 && EnterRacers[0].Tree >= 0 && EnterRacers[0].Tree < TreeList.Count)
                     SelectedLeftTree = TreeList[EnterRacers[0].Tree];
                 else
@@ -648,10 +733,22 @@ namespace PulsarUI.ViewModels
         private async Task LoadFinishLinesAsync()
         {
             FinishList = await _databaseService.GetFinishLinesAsync();
-            // Initialize SelectedFinishLine from EnterPairQueueCategory's Finish index
-            if (FinishList != null && FinishList.Count > 0 && EnterPairQueueCategory != null)
+            // Initialize SelectedFinishLine from EnterPairQueueCategory's Finish index or CategoryDetails
+            if (FinishList != null && FinishList.Count > 0)
             {
-                if (EnterPairQueueCategory.Finish >= 0 && EnterPairQueueCategory.Finish < FinishList.Count)
+                // If a category is already selected and has a Finish id, prefer that
+                if (EnterPairQueueCategory?.CategoryDetails != null)
+                {
+                    var fId = EnterPairQueueCategory.CategoryDetails.Finish;
+                    var finishById = FinishList.FirstOrDefault(f => f.Id == fId);
+                    if (finishById != null)
+                    {
+                        SelectedFinishLine = finishById;
+                        return;
+                    }
+                }
+
+                if (EnterPairQueueCategory != null && EnterPairQueueCategory.Finish >= 0 && EnterPairQueueCategory.Finish < FinishList.Count)
                     SelectedFinishLine = FinishList[EnterPairQueueCategory.Finish];
                 else
                     SelectedFinishLine = FinishList.FirstOrDefault();
