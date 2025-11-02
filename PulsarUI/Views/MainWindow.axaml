@@ -469,12 +469,30 @@
                     <Label Classes="FKeyText" Content="Clear Queue" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="11" x:Name="F12Button" Classes="FKey" HotKey="Ctrl+F12" IsEnabled="{Binding SetupActive}">
+            <Button Grid.Column="11" x:Name="F12Button" Classes="FKey" HotKey="F12" IsEnabled="{Binding SetupActive}" Click="F12Button_Click">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F12" />
                     <Label Classes="FKeyText" Content="Categories" />
                 </StackPanel>
             </Button>
         </Grid>
+
+        <!-- Popup for category selection (3 columns x 12 rows grid) -->
+        <Popup x:Name="CategoryPopup" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" IsLightDismissEnabled="True" Placement="Center">
+            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                <!-- translucent backdrop inside popup -->
+                <Border Background="#88000000" />
+                <!-- inner panel: darker for improved contrast -->
+                <Border Background="#1E1E1E" Padding="12" CornerRadius="6" BorderBrush="#444444" BorderThickness="1"
+                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel>
+                        <TextBlock Text="Categories" FontWeight="Bold" FontSize="18" Margin="0,0,0,8" HorizontalAlignment="Center" Foreground="White" />
+                        <ScrollViewer Width="760" Height="640" Background="#1E1E1E" VerticalScrollBarVisibility="Hidden">
+                            <Grid x:Name="CategoryGrid" Margin="6" />
+                        </ScrollViewer>
+                     </StackPanel>
+                 </Border>
+              </Grid>
+          </Popup>
     </Grid>
 </Window>

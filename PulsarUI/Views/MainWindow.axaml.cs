@@ -1,11 +1,14 @@
 using System;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using CommunityToolkit.Mvvm.Input;
+using Avalonia.Layout;
+using Avalonia.Media;
 using PulsarUI.ViewModels;
+using System.Windows.Input;
 
 namespace PulsarUI.Views
 {
@@ -13,6 +16,21 @@ namespace PulsarUI.Views
     {
         // Provide a design-time view model in the parameterless constructor to satisfy non-nullable usages in XAML
         private MainWindowViewModel _viewModel;
+
+        // Simple ICommand implementation for code-behind keybinding
+        private sealed class RelayCommand : ICommand
+        {
+            private readonly Action<object?> _execute;
+            private readonly Func<object?, bool>? _canExecute;
+            public RelayCommand(Action<object?> execute, Func<object?, bool>? canExecute = null)
+            {
+                _execute = execute ?? throw new ArgumentNullException(nameof(execute));
+                _canExecute = canExecute;
+            }
+            public event EventHandler? CanExecuteChanged;
+            public bool CanExecute(object? parameter) => _canExecute?.Invoke(parameter) ?? true;
+            public void Execute(object? parameter) => _execute(parameter);
+        }
 
         public MainWindow()
         {
@@ -22,6 +40,17 @@ namespace PulsarUI.Views
 
             // Register global key handlers so plus/minus work regardless of focus
             this.AddHandler(KeyDownEvent, OnWindowKeyDown, handledEventsToo: true);
+            // Fallback: also subscribe to KeyDown event
+            this.KeyDown += OnWindowKeyDown;
+            // Add explicit KeyBinding for F12 to ensure it triggers ToggleCategoryPopup
+            this.KeyBindings.Add(new KeyBinding
+            {
+                Gesture = new KeyGesture(Key.F12),
+                Command = new RelayCommand(_ => ToggleCategoryPopup())
+            });
+
+            // Build category grid after InitializeComponent to ensure CategoryGrid is available
+            this.Opened += (_, _) => BuildCategoryGrid();
         }
         public MainWindow(MainWindowViewModel viewModel)
         {
@@ -31,10 +60,29 @@ namespace PulsarUI.Views
 
             // Register global key handlers so plus/minus work regardless of focus
             this.AddHandler(KeyDownEvent, OnWindowKeyDown, handledEventsToo: true);
+            // Fallback: also subscribe to KeyDown event
+            this.KeyDown += OnWindowKeyDown;
+            // Add explicit KeyBinding for F12 in the other constructor as well
+            this.KeyBindings.Add(new KeyBinding
+            {
+                Gesture = new KeyGesture(Key.F12),
+                Command = new RelayCommand(_ => ToggleCategoryPopup())
+            });
+
+            // Build category grid after InitializeComponent to ensure CategoryGrid is available
+            this.Opened += (_, _) => BuildCategoryGrid();
         }
 
         private void OnWindowKeyDown(object? sender, KeyEventArgs e)
         {
+            // Toggle CategoryPopup with F12 (regardless of SetupActive state for now)
+            if (e.Key == Key.F12)
+            {
+                ToggleCategoryPopup();
+                e.Handled = true;
+                return;
+            }
+
             // Only respond when setup is active
             if (_viewModel == null || !_viewModel.SetupActive) return;
 
@@ -314,5 +362,135 @@ namespace PulsarUI.Views
         private static partial Regex DotDigDig();
         [GeneratedRegex(@"^\d{1}\.\d{2}$")]
         private static partial Regex DigDotDigDig();
+
+        // Programmatic popup/grid helpers
+        public void ToggleCategoryPopup()
+        {
+            try
+            {
+                // Only allow popup when setup is active
+                if (_viewModel == null || !_viewModel.SetupActive)
+                {
+                    return;
+                }
+
+                if (CategoryPopup == null) return;
+
+                // When opening, ensure placement is centered on the window
+                if (!CategoryPopup.IsOpen)
+                {
+                    try
+                    {
+                        CategoryPopup.PlacementTarget = this;
+                    }
+                    catch { }
+                }
+
+                CategoryPopup.IsOpen = !CategoryPopup.IsOpen;
+
+                if (CategoryPopup.IsOpen)
+                {
+                    BuildCategoryGrid();
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private void BuildCategoryGrid()
+        {
+            try
+            {
+                if (CategoryGrid == null || _viewModel == null) return;
+
+                // Clear existing children and definitions
+                CategoryGrid.Children.Clear();
+                CategoryGrid.RowDefinitions.Clear();
+                CategoryGrid.ColumnDefinitions.Clear();
+
+                int rows = 12;
+                int cols = 3;
+
+                for (int r = 0; r < rows; r++)
+                    CategoryGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                for (int c = 0; c < cols; c++)
+                    CategoryGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                // Items are expected to be strings like "01 - Name" — use the ViewModel list
+                var items = _viewModel.CategComboBoxItems ?? new List<string>();
+
+                // Ensure we have at least rows*cols items; unfilled cells will be hidden
+                for (int col = 0; col < cols; col++)
+                {
+                    for (int row = 0; row < rows; row++)
+                    {
+                        int index = col * rows + row; // column-major ordering
+                        string content = index < items.Count ? items[index] : string.Empty;
+
+                        var btn = new Button
+                        {
+                            Content = content,
+                            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+                            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch,
+                            Margin = new Avalonia.Thickness(4),
+                            MinHeight = 40
+                        };
+
+                        // Optional: disable empty buttons
+                        if (string.IsNullOrEmpty(content))
+                        {
+                            btn.IsVisible = false;
+                            btn.IsEnabled = false;
+                        }
+                        else
+                        {
+                            // Improve contrast: dark button background, white text, left-aligned text, padding and larger font
+                            try
+                            {
+                                btn.Background = new SolidColorBrush(Color.Parse("#2D2D30"));
+                                btn.Foreground = Brushes.White;
+                                btn.FontSize = 16;
+                                btn.HorizontalContentAlignment = HorizontalAlignment.Left;
+                                btn.VerticalContentAlignment = VerticalAlignment.Center;
+                                btn.Padding = new Avalonia.Thickness(10,6);
+                                btn.BorderBrush = new SolidColorBrush(Color.Parse("#444444"));
+                                btn.BorderThickness = new Avalonia.Thickness(1);
+                            }
+                            catch { }
+
+                            // Wire click to select category: set the ViewModel's selected combo text and close popup
+                            btn.Click += (s, ev) =>
+                            {
+                                try
+                                {
+                                    if (_viewModel != null)
+                                    {
+                                        _viewModel.EnterPairSelectedCategComboText = content;
+                                    }
+                                    // Close the popup if present
+                                    try { if (CategoryPopup != null) CategoryPopup.IsOpen = false; } catch { }
+                                }
+                                catch { }
+                            };
+                        }
+
+                         Grid.SetRow(btn, row);
+                         Grid.SetColumn(btn, col);
+                         CategoryGrid.Children.Add(btn);
+                     }
+                 }
+             }
+             catch
+             {
+                 // ignore runtime issues
+             }
+         }
+
+        private void F12Button_Click(object? sender, RoutedEventArgs e)
+        {
+             ToggleCategoryPopup();
+        }
     }
 }
