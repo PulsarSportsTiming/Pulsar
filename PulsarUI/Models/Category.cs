@@ -19,11 +19,16 @@ public class Category
     public bool SbCycleUnits { get; set; }
     public bool WorstFoul { get; set; }
     public bool FoulInEmpty { get; set; }
-    public int AutoStartSettle { get; set; }
+    public int StageSettle { get; set; }
     public int AutoStartStageToStart { get; set; }
     public int AutoStartVariance { get; set; }
     public int AutoStartTimeout { get; set; }
     public int DefaultClass { get; set; }
     public int LastMode { get; set; }
     public int LastRound { get; set; }
+    public int DelayMin { get; set; }
+    public int DelayMax { get; set; }
+    public bool FixedTree { get; set; }
+    public bool FixedTrack { get; set; }
+    public int SbTimeout { get; set; }
 }

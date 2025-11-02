@@ -8,7 +8,7 @@ public partial class RaceEntry : ObservableObject
     [ObservableProperty] private int _lane;
     [ObservableProperty] private string? _raceNumber;
     [ObservableProperty] private string? _handicapIndex;
-    [ObservableProperty] private int _tree;
+    [ObservableProperty] private TreeType? _tree;
     [ObservableProperty] private int _category;
     [ObservableProperty] private string? _class;
     [ObservableProperty] private string? _name;
@@ -28,9 +28,8 @@ public partial class RaceEntry : ObservableObject
         Class = "";
         Name = "";
         Vehicle = "";
-        QueueIndex = 0;
-        Lane = 0;
-        Tree = 0;
+        // Preserve Lane and QueueIndex so clearing a single lane doesn't change its sideCan you change my code so the tree for each lane resets to the category default in the enter pair and associated combobox after I queue or engage a pair?
+        //Tree = null; // Tree is now a TreeType object; clear to null
         Category = 0;
     }
     
@@ -44,7 +43,8 @@ public partial class RaceEntry : ObservableObject
             Class = this.Class,
             HandicapIndex = this.HandicapIndex,
             QueueIndex = queueIndex,
-            Lane = this.Lane
+            Lane = this.Lane,
+            Tree = this.Tree // preserve TreeType reference when cloning
         };
     }
 }

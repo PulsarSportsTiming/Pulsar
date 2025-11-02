@@ -159,30 +159,38 @@
                 <controls:SensorIcon Grid.Row="13" Grid.Column="0" Classes="ErrorInactive" />
                 <controls:SensorLabel Grid.Row="13" Grid.Column="1" Classes="Disabled"
                                       SensorLabelText="402.336m" />
-                <controls:SensorIcon Grid.Row="13" Grid.Column="2" Classes="ErrorInactive" />
+                <controls:SensorIcon Grid.Row="13" Grid.Column="2" Classes="OKInactive" />
 
-                <!--<controls:RunSetupLabel Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="3" Classes="TreeMixed"
-                                        RSLLeftTree=".4 Pro" RSLRightTree=".5 Full" RSLTree=".4 Pro" />
-                <controls:RunSetupLabel Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left"
-                                        Classes="StartMode" RSLStMode="Auto (7, 0.2)" />-->
-                <Grid Grid.Row="16" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="60,Auto,*"
-                      HorizontalAlignment="Left">
-                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Remote" />
-                    <Label Grid.Column="1" Classes="StandardLabel" Content="—" />
-                    <controls:SensorIcon Grid.Column="2" HorizontalAlignment="Left" Classes="OK" />
+                <Grid Grid.Row="14" Column="0" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto,*">
+                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding EngagePairLeftTreeText}"/>
+                    <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— Tree —" />
+                    <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Right" Content="{Binding EngagePairRightTreeText}"/>    
                 </Grid>
-                <!--<controls:RunSetupLabel Grid.Row="17" Grid.Column="0" Grid.ColumnSpan="3" HorizontalAlignment="Left"
-                                        Classes="Finish" RSLFinish="402.336m" />-->
-                <Grid Grid.Row="18" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="60,Auto,*"
-                      HorizontalAlignment="Left">
-                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Display" />
-                    <Label Grid.Column="1" Classes="StandardLabel" Content="—" />
-                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                
+                <Grid Grid.Row="15" Grid.Column="0" Grid.RowSpan="4" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto,*" RowDefinitions="*,*,*,*">
+                    <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Start Mode" />
+                    <Label Grid.Column="1" Grid.Row="0" Classes="StandardLabel" Content="—" />
+                    <!--<Label Grid.Column="2" Grid.Row="0" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding EngagePairStartModeText}" />-->
+                    <Label Grid.Column="2" Grid.Row="0" Classes="StandardLabel" HorizontalAlignment="Left" Content="Auto (7,0.2)"/>
+                    <Label Grid.Column="0" Grid.Row="1" Classes="StandardLabel" HorizontalAlignment="Right" Content="Remote" />
+                    <Label Grid.Column="1" Grid.Row="1" Classes="StandardLabel" Content="—" />
+                    <controls:SensorIcon Grid.Column="2" Grid.Row="1" HorizontalAlignment="Left" Classes="OK" />
+                    <Label Grid.Column="0" Grid.Row="2" Classes="StandardLabel" HorizontalAlignment="Right" Content="Finish" />
+                    <Label Grid.Column="1" Grid.Row="2" Classes="StandardLabel" Content="—" />
+                    <!--<Label Grid.Column="2" Grid.Row="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding EngagePairFinishLineText}" />-->
+                    <Label Grid.Column="2" Grid.Row="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="402.336m"/>
+                    <Label Grid.Column="0" Grid.Row="3" Classes="StandardLabel" HorizontalAlignment="Right" Content="Display" />
+                    <Label Grid.Column="1" Grid.Row="3" Classes="StandardLabel" Content="—" />
+                    <StackPanel Grid.Column="2" Grid.Row="3" Orientation="Horizontal">
                         <Label Classes="StandardLabelDisabled" Content="In" />
                         <Label Classes="StandardLabel" Content="RT" />
                         <Label Classes="StandardLabel" Content="ET" />
                         <Label Classes="StandardLabel" Content="Sp" />
                     </StackPanel>
+                </Grid>
+                <Grid Grid.Row="18" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="60,Auto,*"
+                      HorizontalAlignment="Left">
+                    
                 </Grid>
             </Grid>
         </Grid>
@@ -258,10 +266,9 @@
         <Grid Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="100, *, 100"
               Background="{DynamicResource TitleBackground}" Margin="1,10,1,0">
             <Label Classes="StandardLabel" Grid.Column="0" Content="Enter Pair" />
-            <!-- StandardEnterPairTitle is mutually exclusive with SwiftSetEnterPairTitle -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
-                        HorizontalAlignment="Center" IsVisible="True" x:Name="StandardEnterPairTitle">
-                <Label Classes="StandardLabelBold" Name="EnterPairCategNameLabel"
+                        HorizontalAlignment="Center" IsVisible="{Binding SetupInactive}">
+                <Label Classes="StandardLabelBold"
                        Content="{Binding EnterPairCategText, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="—" />
                 <Label Classes="StandardLabelBold" Content="{Binding ElementName=ModeComboBox, Path=SelectedItem}"/>
@@ -269,7 +276,7 @@
                 <Label Classes="StandardLabelBold" Content="{Binding EnterPairQueueCategory.Round, Mode=OneWay}" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
-                        HorizontalAlignment="Center" IsVisible="False" x:Name="SwiftSetEnterPairTitle">
+                        HorizontalAlignment="Center" IsVisible="{Binding SetupActive}">
                 <Label Classes="StandardLabelBold" Content="Category" />
                 <ComboBox Width="250" Margin="10,0,10,0"
                           SelectedItem="{Binding EnterPairSelectedCategComboText, Mode=TwoWay}"
@@ -279,7 +286,7 @@
                           SelectedIndex="{Binding EnterPairQueueCategory.Mode, FallbackValue=0, Mode=TwoWay}"
                           ItemsSource="{Binding ModeList, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="Round" />
-                <NumericUpDown Width="110" Margin="10,0,10,0" Minimum="1" Maximum="99"
+                <NumericUpDown Name="RoundNumericUpDown" Width="110" Margin="10,0,10,0" Minimum="1" Maximum="99"
                                Value="{Binding EnterPairQueueCategory.Round, FallbackValue=0, Mode=TwoWay}" FormatString="0"/>
                 <Label Classes="StandardLabelBold" Content="Last Round: "/>
                 <Label Classes="StandardLabelBold" Content="{Binding EnterPairQueueCategory.LastRound}"/>
@@ -325,12 +332,14 @@
         </Grid>
 
         <!-- Enter pair settings -->
-        <Grid Grid.Row="5" Grid.Column="1" x:Name="StandardEnterPairConfig"
+        <Grid Grid.Row="5" Grid.Column="1" IsVisible="{Binding SetupInactive}"
               Background="{DynamicResource TitleBackground}" RowDefinitions="Auto,Auto,Auto" Margin="0,1,0,1">
             <Grid Grid.Row="0" ColumnDefinitions="*,Auto,*">
-                <Label Grid.Row="0" Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="{Binding ElementName=LeftTreeComboBox, Path=SelectedItem.Name, FallbackValue=''}" />
+                <Label Grid.Row="0" Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right"
+                       Content="{Binding ElementName=LeftTreeComboBox, Path=SelectedItem.Name, FallbackValue=''}" />
                 <Label Grid.Row="0" Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— Tree —" />
-                <Label Grid.Row="0" Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding ElementName=RightTreeComboBox, Path=SelectedItem.Name, FallbackValue=''}" />
+                <Label Grid.Row="0" Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left"
+                       Content="{Binding ElementName=RightTreeComboBox, Path=SelectedItem.Name, FallbackValue=''}" />
             </Grid>
             <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*">
                 <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Finish" />
@@ -338,29 +347,26 @@
                 <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding ElementName=FinishLineComboBox, Path=SelectedItem.Description}" />
             </Grid>
         </Grid>
-        <Grid Grid.Row="5" Grid.Column="1" x:Name="SwiftSetEnterPairConfig" IsVisible="False"
+        <Grid Grid.Row="5" Grid.Column="1" IsVisible="{Binding SetupActive}"
               Background="{DynamicResource TitleBackground}" RowDefinitions="*" Margin="0,1,0,1">
             <Grid Grid.Row="0" ColumnDefinitions="60,*,*"
                   RowDefinitions="Auto,Auto">
                 <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
                             HorizontalAlignment="Center">
-                    <ComboBox Name="LeftTreeComboBox"
-                              SelectedItem="{Binding SelectedLeftTree, Mode=TwoWay}"
+                    <ComboBox SelectedItem="{Binding SelectedLeftTree, Mode=TwoWay}" IsEnabled="{Binding LeftTreeComboActive}"
                               DisplayMemberBinding="{Binding Name}"
-                              ItemsSource="{Binding TreeList, Mode=OneWay}"/>
+                              ItemsSource="{Binding TreeList, Mode=OneWay}" Name="LeftTreeComboBox"/>
                     <Label Classes="StandardLabel" Content="— Tree —" />
-                    <ComboBox Name="RightTreeComboBox"
-                              SelectedItem="{Binding SelectedRightTree, Mode=TwoWay}"
+                    <ComboBox SelectedItem="{Binding SelectedRightTree, Mode=TwoWay}" IsEnabled="{Binding RightTreeComboActive}"
                               DisplayMemberBinding="{Binding Name}"
-                              ItemsSource="{Binding TreeList, Mode=OneWay}"/>
+                              ItemsSource="{Binding TreeList, Mode=OneWay}" Name="RightTreeComboBox"/>
                 </StackPanel>
                 <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
                             HorizontalAlignment="Center">
                     <Label Classes="StandardLabel" Content="Finish — " />
-                    <ComboBox Name="FinishLineComboBox"
-                              SelectedItem="{Binding SelectedFinishLine, Mode=TwoWay}"
+                    <ComboBox SelectedItem="{Binding SelectedFinishLine, Mode=TwoWay}" IsEnabled="{Binding FinishLineComboActive}"
                               DisplayMemberBinding="{Binding Description}"
-                              ItemsSource="{Binding FinishList, Mode=OneWay}"/>
+                              ItemsSource="{Binding FinishList, Mode=OneWay}" Name="FinishLineComboBox"/>
                 </StackPanel>
             </Grid>
         </Grid>
@@ -433,7 +439,7 @@
                     <Label Classes="FKeyText" Content="Start" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="6" x:Name="F7Button" Classes="FKey" HotKey="F7">
+            <Button Grid.Column="6" x:Name="F7Button" Classes="FKey" HotKey="F7" Command="{Binding SetupEnableCommand}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F7" />
                     <Label Classes="FKeyText" Content="Setup" />
@@ -463,10 +469,10 @@
                     <Label Classes="FKeyText" Content="Clear Queue" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="11" x:Name="F12Button" Classes="FKey" HotKey="Ctrl+F12" Click="F12Button_OnClick">
+            <Button Grid.Column="11" x:Name="F12Button" Classes="FKey" HotKey="Ctrl+F12" IsEnabled="{Binding SetupActive}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F12" />
-                    <Label Classes="FKeyText" Content="SwiftSet" />
+                    <Label Classes="FKeyText" Content="Categories" />
                 </StackPanel>
             </Button>
         </Grid>

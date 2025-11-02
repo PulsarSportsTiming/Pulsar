@@ -7,11 +7,9 @@ using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PulsarUI.Models;
 using PulsarUI.Services;
-using System.Windows.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.Input;
 using System.Threading.Tasks;
-using Avalonia.Controls.Documents;
 using System.Collections.ObjectModel;
 using Microsoft.Extensions.Configuration;
 
@@ -30,11 +28,12 @@ namespace PulsarUI.ViewModels
 
         private string? _lastConfirmedRaceNum;
 
-        // Provide no-op default commands for design-time so bindings can be evaluated safely
-        public ICommand LeftRaceNumConfirmedCommand { get; } = new RelayCommand(() => { });
-        public ICommand RightRaceNumConfirmedCommand { get; } = new RelayCommand(() => { });
-        public ICommand LeftIndexConfirmedCommand { get; } = new RelayCommand(() => { });
-        public ICommand RightIndexConfirmedCommand { get; } = new RelayCommand(() => { });
+        // Provide async commands so we avoid "async void" lambdas and analyzer warnings; initialized in constructor
+        // Initialize with no-op AsyncRelayCommand so they're safe in design-time constructor paths
+        public CommunityToolkit.Mvvm.Input.IAsyncRelayCommand LeftRaceNumConfirmedCommand { get; private set; } = new CommunityToolkit.Mvvm.Input.AsyncRelayCommand(() => Task.CompletedTask);
+        public CommunityToolkit.Mvvm.Input.IAsyncRelayCommand RightRaceNumConfirmedCommand { get; private set; } = new CommunityToolkit.Mvvm.Input.AsyncRelayCommand(() => Task.CompletedTask);
+        public CommunityToolkit.Mvvm.Input.IAsyncRelayCommand LeftIndexConfirmedCommand { get; private set; } = new CommunityToolkit.Mvvm.Input.AsyncRelayCommand(() => Task.CompletedTask);
+        public CommunityToolkit.Mvvm.Input.IAsyncRelayCommand RightIndexConfirmedCommand { get; private set; } = new CommunityToolkit.Mvvm.Input.AsyncRelayCommand(() => Task.CompletedTask);
 
         [GeneratedRegex(@"^(\d{0,2}(\.\d{0,2})?|\.?\d{0,2})?$")]
 
@@ -61,7 +60,18 @@ namespace PulsarUI.ViewModels
         [ObservableProperty] private List<string> _categComboBoxItems = new();
         [ObservableProperty] private List<string>? _treeComboBoxItems;
         [ObservableProperty] private string? _enterPairSelectedCategComboText;
-        private CategQueueItem _enterPairQueueCategory = default!;
+        private CategQueueItem _enterPairQueueCategory = new CategQueueItem { QueueIndex = 0, Category = 0, Finish = 0, Mode = 0, Round = 1, LastRound = 0 };
+
+        [ObservableProperty] private bool _leftTreeComboActive;
+        [ObservableProperty] private bool _rightTreeComboActive;
+        [ObservableProperty] private bool _finishLineComboActive;
+        [ObservableProperty] private bool _setupActive;
+        [ObservableProperty] private bool _setupInactive = true;
+
+        // Strongly-typed references to generated IRelayCommand instances to avoid repeated casts
+        private CommunityToolkit.Mvvm.Input.IRelayCommand? _queuePairCommandRef;
+        private CommunityToolkit.Mvvm.Input.IRelayCommand? _engagePairCommandRef;
+        private CommunityToolkit.Mvvm.Input.IRelayCommand? _clearQueueCommandRef;
 
         public CategQueueItem EnterPairQueueCategory
         {
@@ -78,7 +88,7 @@ namespace PulsarUI.ViewModels
         }
 
         [ObservableProperty] private string? _enterPairCategText;
-        private CategQueueItem _queuePairQueueCategory = null!;
+        private CategQueueItem _queuePairQueueCategory = new CategQueueItem { QueueIndex = 1, Category = 0, Finish = 0, Mode = 0, Round = 1, LastRound = 0 };
 
         public CategQueueItem QueuePairQueueCategory
         {
@@ -96,7 +106,7 @@ namespace PulsarUI.ViewModels
             }
         }
         [ObservableProperty] private string? _queuePairCategText;
-        private CategQueueItem _engagePairQueueCategory = default!;
+        private CategQueueItem _engagePairQueueCategory = new CategQueueItem { QueueIndex = 2, Category = 0, Finish = 0, Mode = 0, Round = 1, LastRound = 0 };
         public CategQueueItem EngagePairQueueCategory
         {
             get => _engagePairQueueCategory;
@@ -130,18 +140,18 @@ namespace PulsarUI.ViewModels
         partial void OnSelectedLeftTreeChanged(TreeType? value)
         {
             if (value == null || TreeList == null) return;
-            var idx = TreeList.IndexOf(value);
-            if (idx >= 0 && EnterRacers.Count > 0 && EnterRacers[0].Tree != idx)
-                EnterRacers[0].Tree = idx;
+            // Assign the selected TreeType directly to the RaceEntry.Tree (was previously numeric index)
+            if (EnterRacers.Count > 0 && EnterRacers[0].Tree != value)
+                EnterRacers[0].Tree = value;
         }
 
         [ObservableProperty] private TreeType? _selectedRightTree;
         partial void OnSelectedRightTreeChanged(TreeType? value)
         {
             if (value == null || TreeList == null) return;
-            var idx = TreeList.IndexOf(value);
-            if (idx >= 0 && EnterRacers.Count > 1 && EnterRacers[1].Tree != idx)
-                EnterRacers[1].Tree = idx;
+            // Assign the selected TreeType directly to the RaceEntry.Tree (was previously numeric index)
+            if (EnterRacers.Count > 1 && EnterRacers[1].Tree != value)
+                EnterRacers[1].Tree = value;
         }
 
         // Finish Line Properties
@@ -178,6 +188,10 @@ namespace PulsarUI.ViewModels
                 };
                 // Ensure there are empty placeholders so bindings in XAML don't NRE
                 EnterPairQueueCategory = new CategQueueItem { QueueIndex = 0, Category = 0, Finish = 0, Mode = 0, Round = 1, LastRound = 0 };
+
+                // Also ensure queued racer tree text properties exist for designer
+                QueuePairLeftTreeText = string.Empty;
+                QueuePairRightTreeText = string.Empty;
                 return;
             }
              // Date/Time Display
@@ -205,7 +219,6 @@ namespace PulsarUI.ViewModels
             _ = LoadCategoriesAsync();
 
             _mqttService = new MqttService();
-            _ = LoadCategoriesAsync();
 
             EnterPairQueueCategory = new CategQueueItem
             {
@@ -230,10 +243,16 @@ namespace PulsarUI.ViewModels
                 racer.PropertyChanged += EnterPairRacerEntryHandler;
             foreach (var racer in QueuedRacers)
                 racer.PropertyChanged += QueuePairRacerEntry_PropertyChanged;
-            // EngagedRacers can have a handler if needed
 
-            EnterPairRacerEntryHandler(EnterRacers[0], new PropertyChangedEventArgs(nameof(RaceEntry.RaceNumber)));
-            EnterPairRacerEntryHandler(EnterRacers[1], new PropertyChangedEventArgs(nameof(RaceEntry.RaceNumber)));
+            // Attach collection changed handler for QueuedRacers to maintain derived tree text properties
+            QueuedRacers.CollectionChanged += QueuedRacers_CollectionChanged;
+            // Ensure handlers for existing items are attached and initial text is set
+            for (int i = 0; i < QueuedRacers.Count; i++)
+            {
+                if (QueuedRacers[i] != null)
+                    QueuedRacers[i].PropertyChanged += QueuePairRacer_PropertyChanged;
+            }
+            UpdateQueuePairTreeTexts();
 
             // Initialize runtime ModeList (correct C# List initializer)
             ModeList = new List<string>
@@ -244,7 +263,8 @@ namespace PulsarUI.ViewModels
                 "Q+E Combo"
             };
 
-            LeftRaceNumConfirmedCommand = new RelayCommand(async () =>
+            // Initialize async commands with actual handlers
+            LeftRaceNumConfirmedCommand = new AsyncRelayCommand(async () =>
             {
                 var raceNum = EnterRacers[0]?.RaceNumber;
 
@@ -259,7 +279,7 @@ namespace PulsarUI.ViewModels
                 UpdateButtonStatuses();
             });
 
-            RightRaceNumConfirmedCommand = new RelayCommand(async () =>
+            RightRaceNumConfirmedCommand = new AsyncRelayCommand(async () =>
             {
                 var raceNum = EnterRacers[1]?.RaceNumber;
 
@@ -273,17 +293,22 @@ namespace PulsarUI.ViewModels
                 UpdateButtonStatuses();
             });
 
-            LeftIndexConfirmedCommand = new RelayCommand(async () =>
+            LeftIndexConfirmedCommand = new AsyncRelayCommand(async () =>
             {
                 if (EnterRacers[0] != null)
                     await _mqttService.PubQueueRacersAsync(EnterRacers[0]);
             });
 
-            RightIndexConfirmedCommand = new RelayCommand(async () =>
+            RightIndexConfirmedCommand = new AsyncRelayCommand(async () =>
             {
                 if (EnterRacers[1] != null)
                     await _mqttService.PubQueueRacersAsync(EnterRacers[1]);
             });
+
+            // Capture typed IRelayCommand references generated by the source generator so we can call NotifyCanExecuteChanged without casts
+            _queuePairCommandRef = QueuePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
+            _engagePairCommandRef = EngagePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
+            _clearQueueCommandRef = ClearQueueCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
 
             // Keep handlers in sync if collection items are replaced or changed
             EnterRacers.CollectionChanged += (s, e) =>
@@ -305,6 +330,43 @@ namespace PulsarUI.ViewModels
             };
         }
 
+        // Called when QueuedRacers collection changes so we can attach/detach item handlers and update derived text
+        private void QueuedRacers_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            if (e.OldItems != null)
+            {
+                foreach (RaceEntry oldR in e.OldItems)
+                    oldR.PropertyChanged -= QueuePairRacer_PropertyChanged;
+            }
+            if (e.NewItems != null)
+            {
+                foreach (RaceEntry newR in e.NewItems)
+                    newR.PropertyChanged += QueuePairRacer_PropertyChanged;
+            }
+            UpdateQueuePairTreeTexts();
+        }
+
+        // Item-level property changed handler — react when Tree changes on a queued racer
+        private void QueuePairRacer_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (sender is RaceEntry re)
+            {
+                if (e.PropertyName == nameof(RaceEntry.Tree) || string.IsNullOrEmpty(e.PropertyName))
+                {
+                    // If the Tree object changed, we might also want to observe its internal changes (like Name) —
+                    // but TreeType does not implement INotifyPropertyChanged. So treat Tree replacement as a full change.
+                    UpdateQueuePairTreeTexts();
+                }
+            }
+        }
+
+        // This method computes the textual labels for the queued pair trees and raises property changed notifications
+        private void UpdateQueuePairTreeTexts()
+        {
+            QueuePairLeftTreeText = QueuedRacers.ElementAtOrDefault(0)?.Tree?.Name ?? string.Empty;
+            QueuePairRightTreeText = QueuedRacers.ElementAtOrDefault(1)?.Tree?.Name ?? string.Empty;
+        }
+
         // Stub for missing event handler to fix compile error
         private void QueuePairRacerEntry_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
@@ -315,10 +377,10 @@ namespace PulsarUI.ViewModels
                 e.PropertyName == nameof(RaceEntry.Vehicle))
             {
                 UpdateButtonStatuses();
-                // Notify RelayCommands so UI updates immediately
-                (QueuePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
-                (EngagePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
-                (ClearQueueCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
+                // Notify RelayCommands so UI updates immediately (use typed refs to avoid repeated casts)
+                _queuePairCommandRef?.NotifyCanExecuteChanged();
+                _engagePairCommandRef?.NotifyCanExecuteChanged();
+                _clearQueueCommandRef?.NotifyCanExecuteChanged();
             }
             // TODO: Implement logic if needed
         }
@@ -340,6 +402,10 @@ namespace PulsarUI.ViewModels
         // When true, EnterPairQueueCategoryHandler will suppress publishing to MQTT so
         // we can make several programmatic changes and then publish once explicitly.
         private bool _suppressCategPublish = false;
+
+        // When true, EnterPairRacerEntryHandler will suppress publishing Tree changes so
+        // programmatic resets (ClearAll + set default Tree) don't emit transient nulls.
+        private bool _suppressRaceEntryPublish = false;
 
         private bool IsCategQueueItemDifferent(CategQueueItem? a, CategQueueItem? b)
         {
@@ -369,7 +435,12 @@ namespace PulsarUI.ViewModels
             {
                 var cat = Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory.Category);
                 if (cat != null)
+                {
                     EnterPairQueueCategory.CategoryDetails = cat;
+                    FinishLineComboActive = !EnterPairQueueCategory.CategoryDetails.FixedTrack;
+                    LeftTreeComboActive = !EnterPairQueueCategory.CategoryDetails.FixedTree;
+                    RightTreeComboActive = LeftTreeComboActive && EnterPairQueueCategory.CategoryDetails.SplitTreeAllowed;
+                }
             }
 
             if (IsCategQueueItemDifferent(EnterPairQueueCategory, _lastSentEnterPairQueueCategory))
@@ -418,23 +489,30 @@ namespace PulsarUI.ViewModels
                 e.PropertyName == nameof(RaceEntry.Vehicle))
             {
                 UpdateButtonStatuses();
-                // Notify RelayCommands so UI updates immediately
-                (QueuePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
-                (EngagePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
-                (ClearQueueCommand as CommunityToolkit.Mvvm.Input.IRelayCommand)?.NotifyCanExecuteChanged();
+                // Notify RelayCommands so UI updates immediately (use typed refs to avoid repeated casts)
+                _queuePairCommandRef?.NotifyCanExecuteChanged();
+                _engagePairCommandRef?.NotifyCanExecuteChanged();
+                _clearQueueCommandRef?.NotifyCanExecuteChanged();
             }
             // Send Tree value over MQTT when it changes
             if (e.PropertyName == nameof(RaceEntry.Tree) && sender is RaceEntry raceEntry)
             {
-                // Publish the updated RaceEntry, including the new Tree value
-                _ = _mqttService?.PubQueueRacersAsync(raceEntry);
-                // Keep SelectedItem bindings in sync with the numeric Tree index
-                if (TreeList != null)
+                // Suppress publishing when we are programmatically resetting entries to avoid
+                // emitting intermediate null Tree values. When suppression is active we also
+                // skip updating SelectedLeft/Right here; the caller will set SelectedLeft/Right
+                // after the reset to the final default Tree.
+                if (!_suppressRaceEntryPublish)
                 {
-                    if (raceEntry.Lane == 0)
-                        SelectedLeftTree = (raceEntry.Tree >= 0 && raceEntry.Tree < TreeList.Count) ? TreeList[raceEntry.Tree] : null;
-                    else if (raceEntry.Lane == 1)
-                        SelectedRightTree = (raceEntry.Tree >= 0 && raceEntry.Tree < TreeList.Count) ? TreeList[raceEntry.Tree] : null;
+                    // Publish the updated RaceEntry, including the new Tree value
+                    _ = _mqttService?.PubQueueRacersAsync(raceEntry);
+                    // Keep SelectedItem bindings in sync with the RaceEntry.Tree (now a TreeType object)
+                    if (TreeList != null)
+                    {
+                        if (raceEntry.Lane == 0)
+                            SelectedLeftTree = raceEntry.Tree ?? SelectedLeftTree;
+                        else if (raceEntry.Lane == 1)
+                            SelectedRightTree = raceEntry.Tree ?? SelectedRightTree;
+                    }
                 }
             }
             _ = EnterPairRacerEntryHandlerAsync(sender, e);
@@ -457,6 +535,16 @@ namespace PulsarUI.ViewModels
 
             if (e.PropertyName == nameof(RaceEntry.RaceNumber))
             {
+                // Capture the current Tree for this lane so we can preserve it if the DB lookup
+                // doesn't provide a Tree. This avoids a race where an async DB result clears the Tree.
+                TreeType? currentTree = null;
+                if (raceEntry != null && TreeList != null)
+                {
+                    // Try to get the existing value from the current EnterRacers slot if present
+                    if (raceEntry.Lane == 0 && EnterRacers.Count > 0) currentTree = EnterRacers[0].Tree;
+                    else if (raceEntry.Lane == 1 && EnterRacers.Count > 1) currentTree = EnterRacers[1].Tree;
+                }
+
                 var indexList = await _databaseService.GetIndexListAsync(raceEntry, EnterPairQueueCategory);
                 var indexes = new[]
                 {
@@ -468,6 +556,20 @@ namespace PulsarUI.ViewModels
                 raceEntry.HandicapIndex = indexes.FirstOrDefault(index => index != "") ?? "00.00";
                 raceEntry.ClearDetails();
                 raceEntry = await _databaseService.GetRacerDetailsAsync(raceEntry, EnterPairQueueCategory);
+                // If DB didn't include a Tree, restore the previous tree or the category default
+                if (raceEntry.Tree == null)
+                {
+                    raceEntry.Tree = currentTree;
+                    if (raceEntry.Tree == null && EnterPairQueueCategory != null && Categories != null && TreeList != null)
+                    {
+                        var cat = EnterPairQueueCategory.CategoryDetails ?? Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory.Category);
+                        if (cat != null)
+                        {
+                            var defaultTree = TreeList.FirstOrDefault(t => t != null && t.Id == cat.TreeType);
+                            raceEntry.Tree = defaultTree;
+                        }
+                    }
+                }
             }
             switch (raceEntry.Lane)
             {
@@ -551,19 +653,51 @@ namespace PulsarUI.ViewModels
             QueuePairFinishText = (FinishList != null && EnterPairQueueCategory != null && EnterPairQueueCategory.Finish >= 0 && EnterPairQueueCategory.Finish < FinishList.Count)
                 ? FinishList[EnterPairQueueCategory.Finish].Description
                 : string.Empty;
-            QueuePairModeText = (ModeList != null && EnterPairQueueCategory != null && EnterPairQueueCategory.Mode >= 0 && EnterPairQueueCategory.Mode < ModeList.Count)
-                ? ModeList[EnterPairQueueCategory.Mode] + " Round " + EnterPairQueueCategory.Round
-                : (ModeList.FirstOrDefault() ?? string.Empty) + " Round " + EnterPairQueueCategory.Round;
+
+            // Null-safe mode text construction to avoid nullable warnings
+            string modeName = (ModeList != null && EnterPairQueueCategory != null && EnterPairQueueCategory.Mode >= 0 && EnterPairQueueCategory.Mode < ModeList.Count)
+                ? ModeList[EnterPairQueueCategory.Mode]
+                : (ModeList?.FirstOrDefault() ?? string.Empty);
+
+            QueuePairModeText = $"{modeName} Round {EnterPairQueueCategory?.Round ?? 0}";
             QueuePairQueueCategory = EnterPairQueueCategory.Clone(1);
             EnterPairCategText = category.Name;
+
+            // Suppress RaceEntry Tree publishes while we ClearAll and set defaults
+            _suppressRaceEntryPublish = true;
+
             for (int i = 0; i < EnterRacers.Count; i++)
             {
                 QueuedRacers[i] = EnterRacers[i].Clone(1);
+                // Temporarily detach handler to prevent async DB lookups reacting to our programmatic ClearAll
+                EnterRacers[i].PropertyChanged -= EnterPairRacerEntryHandler;
                 EnterRacers[i].ClearAll();
+
+                // Reset the Enter pair Tree for this lane to the category default (if available)
+                if (TreeList != null && TreeList.Count > 0 && EnterPairQueueCategory != null && Categories != null)
+                {
+                    var cat = Categories.Find(c => c != null && c.Id == EnterPairQueueCategory.Category);
+                    if (cat != null)
+                    {
+                        var defaultTree = TreeList.FirstOrDefault(t => t != null && t.Id == cat.TreeType);
+                        if (defaultTree != null)
+                        {
+                            EnterRacers[i].Tree = defaultTree;
+                            if (i == 0) SelectedLeftTree = defaultTree;
+                            else if (i == 1) SelectedRightTree = defaultTree;
+                        }
+                    }
+                }
+                // Reattach the handler after programmatic changes
+                EnterRacers[i].PropertyChanged += EnterPairRacerEntryHandler;
             }
-            // Send MQTT nulls for EnterPair
+
+            // Re-enable publishes and send consolidated publishes so subscribers only see final state
+            _suppressRaceEntryPublish = false;
+
+            // Publish current EnterRacers state (includes Tree defaults) and queued racers
             for (int i = 0; i < EnterRacers.Count; i++)
-                _ = _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 0, Lane = i });
+                _ = _mqttService.PubQueueRacersAsync(EnterRacers[i]);
             foreach (var racer in QueuedRacers)
             {
                 _ = _mqttService.PubQueueRacersAsync(racer);
@@ -599,17 +733,62 @@ namespace PulsarUI.ViewModels
             {
                 category = Categories?.Find(c => c?.Id == EnterPairQueueCategory.Category);
                 EngagePairQueueCategory = EnterPairQueueCategory.Clone(2);
+
+                // Suppress RaceEntry Tree publishes while we ClearAll and set defaults for EnterRacers
+                _suppressRaceEntryPublish = true;
                 for (int i = 0; i < EnterRacers.Count; i++)
                 {
+                    // Detach handler, clear and reattach after default assignment
+                    EnterRacers[i].PropertyChanged -= EnterPairRacerEntryHandler;
                     EnterRacers[i].ClearAll();
-                    _ = _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 0, Lane = i });
                 }
-                UpdateButtonStatuses();
+
+                // After clearing, set defaults below (still suppressed until after this block)
             }
             if (category == null) return;
+
+            // After engaging, only reset the Enter Pair UI lanes to the EnterPair category default
+            // when we engaged from the Enter pair (i.e., no queued entries). Do not clear EnterRacers
+            // when the user engaged a queued pair — preserve the Enter pair inputs.
+            if (!queueHasEntries)
+            {
+                if (EnterPairQueueCategory != null && Categories != null && TreeList != null && TreeList.Count > 0)
+                {
+                    var enterCat = EnterPairQueueCategory.CategoryDetails ?? Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory.Category);
+                    if (enterCat != null)
+                    {
+                        var defaultTree = TreeList.FirstOrDefault(t => t != null && t.Id == enterCat.TreeType);
+                        for (int i = 0; i < EnterRacers.Count; i++)
+                        {
+                            // Clear textual details and reset Tree to default for the Enter pair lanes
+                            // Ensure we operate on an object that won't fire handlers while we change it
+                            EnterRacers[i].PropertyChanged -= EnterPairRacerEntryHandler;
+                            EnterRacers[i].ClearAll();
+                            if (defaultTree != null)
+                            {
+                                EnterRacers[i].Tree = defaultTree;
+                                if (i == 0) SelectedLeftTree = defaultTree;
+                                else if (i == 1) SelectedRightTree = defaultTree;
+                            }
+                            EnterRacers[i].PropertyChanged += EnterPairRacerEntryHandler;
+                        }
+                    }
+                }
+
+                // Re-enable publishes and emit consolidated EnterRacers publishes so subscribers only see final state
+                _suppressRaceEntryPublish = false;
+                if (EnterPairQueueCategory != null)
+                {
+                    for (int i = 0; i < EnterRacers.Count; i++)
+                        _ = _mqttService.PubQueueRacersAsync(EnterRacers[i]);
+                }
+            }
+
             EngagePairCategText = category.Name;
             SystemEngaged = true;
             UpdateButtonStatuses();
+            // Publish run configuration (use EngagedRacers collection; new overload handles left/right)
+            _ = _mqttService.PubRunConfigAsync(EngagePairQueueCategory, EngagedRacers);
         }
 
         [RelayCommand]
@@ -656,6 +835,18 @@ namespace PulsarUI.ViewModels
         }
 
         [RelayCommand]
+        private void SetupEnable()
+        {
+            SetupActive = !SetupActive;
+            SetupInactive = !SetupActive;
+
+            if (SetupActive)
+            {
+                
+            }
+        }
+
+        [RelayCommand]
         private async Task ClearQueue()
         {
             foreach (var racer in QueuedRacers)
@@ -668,9 +859,38 @@ namespace PulsarUI.ViewModels
         public async Task ClearEnterPairQueue()
         {
             foreach (var racer in EnterRacers)
+            {
+                racer.PropertyChanged -= EnterPairRacerEntryHandler;
                 racer.ClearAll();
-            for (int i = 0; i < EnterRacers.Count; i++)
-                await _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 0, Lane = i });
+            }
+            // After clearing, ensure each Enter lane's Tree is set to the selected category default (if available)
+            if (EnterPairQueueCategory != null && Categories != null && TreeList != null && TreeList.Count > 0)
+            {
+                var enterCat = EnterPairQueueCategory.CategoryDetails ?? Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory.Category);
+                var defaultTree = enterCat != null ? TreeList.FirstOrDefault(t => t != null && t.Id == enterCat.TreeType) : null;
+                for (int i = 0; i < EnterRacers.Count; i++)
+                {
+                    // Clear textual fields already done; assign default Tree
+                    if (defaultTree != null)
+                    {
+                        EnterRacers[i].Tree = defaultTree;
+                        if (i == 0) SelectedLeftTree = defaultTree;
+                        else if (i == 1) SelectedRightTree = defaultTree;
+                    }
+                    // Reattach handler after programmatic edit
+                    EnterRacers[i].PropertyChanged += EnterPairRacerEntryHandler;
+                    await _mqttService.PubQueueRacersAsync(EnterRacers[i]);
+                }
+            }
+            else
+            {
+                // No default available, still publish cleared EnterRacers so subscribers know lanes are cleared
+                for (int i = 0; i < EnterRacers.Count; i++)
+                {
+                    EnterRacers[i].PropertyChanged += EnterPairRacerEntryHandler;
+                     await _mqttService.PubQueueRacersAsync(EnterRacers[i]);
+                }
+            }
             UpdateButtonStatuses();
         }
 
@@ -702,7 +922,7 @@ namespace PulsarUI.ViewModels
         private async Task LoadTreeTypesAsync()
         {
             TreeList = await _databaseService.GetTreeTypesAsync();
-            // Initialize SelectedLeftTree/SelectedRightTree from existing EnterRacers' Tree indices
+            // Initialize SelectedLeftTree/SelectedRightTree from existing EnterRacers' Tree values
             if (TreeList != null && TreeList.Count > 0)
             {
                 // If a category is already selected and has a TreeType, prefer that
@@ -718,13 +938,14 @@ namespace PulsarUI.ViewModels
                     }
                 }
 
-                if (EnterRacers.Count > 0 && EnterRacers[0].Tree >= 0 && EnterRacers[0].Tree < TreeList.Count)
-                    SelectedLeftTree = TreeList[EnterRacers[0].Tree];
+                // If EnterRacers already have Tree values (TreeType), use them; otherwise pick sensible defaults
+                if (EnterRacers.Count > 0 && EnterRacers[0].Tree != null)
+                    SelectedLeftTree = EnterRacers[0].Tree;
                 else
                     SelectedLeftTree = TreeList.FirstOrDefault();
 
-                if (EnterRacers.Count > 1 && EnterRacers[1].Tree >= 0 && EnterRacers[1].Tree < TreeList.Count)
-                    SelectedRightTree = TreeList[EnterRacers[1].Tree];
+                if (EnterRacers.Count > 1 && EnterRacers[1].Tree != null)
+                    SelectedRightTree = EnterRacers[1].Tree;
                 else
                     SelectedRightTree = TreeList.ElementAtOrDefault(1) ?? TreeList.FirstOrDefault();
             }
@@ -771,6 +992,7 @@ namespace PulsarUI.ViewModels
         public bool IsF11Enabled =>
             QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
 
+
         // Centralized helper to update all button-related bindings
         private void UpdateButtonStatuses()
         {
@@ -780,3 +1002,4 @@ namespace PulsarUI.ViewModels
         }
     }
 }
+

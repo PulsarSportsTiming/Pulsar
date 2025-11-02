@@ -3,7 +3,6 @@ using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using PulsarUI.Interfaces;
 using PulsarUI.Models;
-using Tmds.DBus.Protocol;
 
 namespace PulsarUI.Services
 {
@@ -142,14 +141,19 @@ namespace PulsarUI.Services
                                        categories.sb_units,
                                        categories.worst_foul,
                                        categories.foul_empty,
-                                       categories.as_settle,
+                                       categories.stage_settle,
                                        categories.as_stagetostart,
                                        categories.as_variance,
                                        categories.as_timeout,
                                        categories.def_class,
                                        classes.name AS def_class_name,
                                        categories.last_mode,
-                                       categories.last_round
+                                       categories.last_round,
+                                       categories.delay_min,
+                                       categories.delay_max,
+                                        categories.fixed_tree,
+                                        categories.fixed_track,
+                                        categories.sb_timeout
                                    FROM categories
                                             JOIN tree_types ON categories.tree = tree_types.id
                                             JOIN finish_lines ON categories.finish = finish_lines.id
@@ -208,13 +212,18 @@ namespace PulsarUI.Services
                     SbCycleUnits = ReadBool("sb_units"),
                     WorstFoul = ReadBool("worst_foul"),
                     FoulInEmpty = ReadBool("foul_empty"),
-                    AutoStartSettle = ReadInt("as_settle"),
+                    StageSettle = ReadInt("stage_settle"),
                     AutoStartStageToStart = ReadInt("as_stagetostart"),
                     AutoStartVariance = ReadInt("as_variance"),
                     AutoStartTimeout = ReadInt("as_timeout"),
                     DefaultClass = ReadInt("def_class"),
                     LastMode = ReadInt("last_mode"),
-                    LastRound = ReadInt("last_round")
+                    LastRound = ReadInt("last_round"),
+                    DelayMin = ReadInt("delay_min"),
+                    DelayMax = ReadInt("delay_max"),
+                    FixedTree = ReadBool("fixed_tree"),
+                    FixedTrack = ReadBool("fixed_track"),
+                    SbTimeout = ReadInt("sb_timeout")
                 };
                 categories.Add(category);
             }

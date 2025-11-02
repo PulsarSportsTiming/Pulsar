@@ -19,14 +19,103 @@ namespace PulsarUI.Views
             _viewModel = new MainWindowViewModel();
             InitializeComponent();
             DataContext = _viewModel;
+
+            // Register global key handlers so plus/minus work regardless of focus
+            this.AddHandler(KeyDownEvent, OnWindowKeyDown, handledEventsToo: true);
         }
         public MainWindow(MainWindowViewModel viewModel)
         {
             _viewModel = viewModel;
             InitializeComponent();
             DataContext = _viewModel;
+
+            // Register global key handlers so plus/minus work regardless of focus
+            this.AddHandler(KeyDownEvent, OnWindowKeyDown, handledEventsToo: true);
         }
-        
+
+        private void OnWindowKeyDown(object? sender, KeyEventArgs e)
+        {
+            // Only respond when setup is active
+            if (_viewModel == null || !_viewModel.SetupActive) return;
+
+            if (RoundNumericUpDown == null) return;
+
+            // Determine plus/minus keys: handle main keyboard (+ via OemPlus with Shift or '='), and numpad Add/Subtract
+            bool handled = false;
+
+            // Numpad keys
+            if (e.Key == Key.Add || e.Key == Key.Subtract)
+            {
+                handled = true;
+                if (e.Key == Key.Add)
+                    AdjustRound(1);
+                else
+                    AdjustRound(-1);
+            }
+            else
+            {
+                // Fallback: inspect KeySymbol (char) which is more consistent across platforms for +/ -
+                var sym = e.KeySymbol ?? string.Empty;
+                if (sym == "+")
+                {
+                    handled = true;
+                    AdjustRound(1);
+                }
+                else if (sym == "-")
+                {
+                    handled = true;
+                    AdjustRound(-1);
+                }
+                else if (sym == "=" && (e.KeyModifiers & KeyModifiers.Shift) != 0)
+                {
+                    // Shift+ = often produces + on some keyboards
+                    handled = true;
+                    AdjustRound(1);
+                }
+            }
+
+            // Page Up / Page Down change ModeComboBox selection when setup is active
+            if (!handled)
+            {
+                if (e.Key == Key.PageUp)
+                {
+                    AdjustMode(-1);
+                    handled = true;
+                }
+                else if (e.Key == Key.PageDown)
+                {
+                    AdjustMode(1);
+                    handled = true;
+                }
+            }
+
+            if (handled)
+            {
+                e.Handled = true;
+            }
+        }
+
+        private void AdjustRound(int delta)
+        {
+            try
+            {
+                // NumericUpDown uses decimal? for Value/Min/Max in Avalonia. Use decimal arithmetic.
+                decimal current = RoundNumericUpDown.Value ?? 0m;
+                decimal min = RoundNumericUpDown.Minimum;
+                decimal max = RoundNumericUpDown.Maximum;
+
+                decimal newVal = current + delta;
+                if (newVal < min) newVal = min;
+                if (newVal > max) newVal = max;
+
+                RoundNumericUpDown.Value = newVal;
+            }
+            catch
+            {
+                // Ignore any runtime issues
+            }
+        }
+
         private void RaceNumBox_OnKeyDown(object? sender, KeyEventArgs e)
         {
             if (sender is not TextBox textBox) return;
@@ -40,12 +129,12 @@ namespace PulsarUI.Views
                 {
                     if (_viewModel.LeftRaceNumConfirmedCommand.CanExecute(text))
                     {
-                        (_viewModel.LeftRaceNumConfirmedCommand as RelayCommand)?.Execute(null);
+                        _viewModel.LeftRaceNumConfirmedCommand.Execute(null);
                     }
                 }
                 else if (textBox.Name == "RightRaceNumBox" && _viewModel.RightRaceNumConfirmedCommand.CanExecute(text))
                 {
-                    (_viewModel.RightRaceNumConfirmedCommand as RelayCommand)?.Execute(null);
+                    _viewModel.RightRaceNumConfirmedCommand.Execute(null);
                 }
 
                 // Lane logic
@@ -109,14 +198,14 @@ namespace PulsarUI.Views
                     case "LeftIndexBox":
                         if (_viewModel.LeftIndexConfirmedCommand.CanExecute(null))
                         {
-                            (_viewModel.LeftIndexConfirmedCommand as RelayCommand)?.Execute(null);
+                            _viewModel.LeftIndexConfirmedCommand.Execute(null);
                         }
                         RightRaceNumBox.Focus();
                         break;
                     case "RightIndexBox":
                         if (_viewModel.RightIndexConfirmedCommand.CanExecute(null))
                         {
-                            (_viewModel.RightIndexConfirmedCommand as RelayCommand)?.Execute(null);
+                            _viewModel.RightIndexConfirmedCommand.Execute(null);
                         }
                         LeftRaceNumBox.Focus();
                         break;
@@ -196,12 +285,29 @@ namespace PulsarUI.Views
             textBox.SelectAll();
         }
 
-        private void F12Button_OnClick(object? sender, RoutedEventArgs e)
+        private void AdjustMode(int delta)
         {
-            SwiftSetEnterPairConfig.IsVisible = !SwiftSetEnterPairConfig.IsVisible;
-            SwiftSetEnterPairTitle.IsVisible = !SwiftSetEnterPairTitle.IsVisible;
-            StandardEnterPairConfig.IsVisible = !StandardEnterPairConfig.IsVisible;
-            StandardEnterPairTitle.IsVisible = !StandardEnterPairTitle.IsVisible;
+            try
+            {
+                if (ModeComboBox == null) return;
+
+                var items = ModeComboBox.Items;
+                int count = items == null ? 0 : items.Cast<object>().Count();
+
+                if (count == 0)
+                    return;
+
+                int current = ModeComboBox.SelectedIndex;
+                if (current < 0)
+                    current = 0; // pick first if none selected
+
+                int newIndex = Math.Clamp(current + delta, 0, count - 1);
+                ModeComboBox.SelectedIndex = newIndex;
+            }
+            catch
+            {
+                // ignore any runtime issues
+            }
         }
 
         [GeneratedRegex(@"^\.\d{2}$")]
