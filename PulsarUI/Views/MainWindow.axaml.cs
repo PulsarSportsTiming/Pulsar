@@ -51,6 +51,29 @@ namespace PulsarUI.Views
 
             // Build category grid after InitializeComponent to ensure CategoryGrid is available
             this.Opened += (_, _) => BuildCategoryGrid();
+
+            // Wire popup opened/closed to manage focus and buffer reliably (handles light-dismiss)
+            try
+            {
+                if (CategoryPopup != null)
+                {
+                    CategoryPopup.Opened += (_, _) =>
+                    {
+                        _categoryTyped = string.Empty;
+                        UpdateCategoryTypedDisplay();
+                        BuildCategoryGrid();
+                        try { CategoryCaptureBox?.Focus(); } catch { }
+                    };
+
+                    CategoryPopup.Closed += (_, _) =>
+                    {
+                        try { LeftRaceNumBox?.Focus(); } catch { }
+                        _categoryTyped = string.Empty;
+                        UpdateCategoryTypedDisplay();
+                    };
+                }
+            }
+            catch { }
         }
         public MainWindow(MainWindowViewModel viewModel)
         {
@@ -71,6 +94,116 @@ namespace PulsarUI.Views
 
             // Build category grid after InitializeComponent to ensure CategoryGrid is available
             this.Opened += (_, _) => BuildCategoryGrid();
+
+            // Wire popup opened/closed to manage focus and buffer reliably (handles light-dismiss)
+            try
+            {
+                if (CategoryPopup != null)
+                {
+                    CategoryPopup.Opened += (_, _) =>
+                    {
+                        _categoryTyped = string.Empty;
+                        UpdateCategoryTypedDisplay();
+                        BuildCategoryGrid();
+                        try { CategoryCaptureBox?.Focus(); } catch { }
+                    };
+
+                    CategoryPopup.Closed += (_, _) =>
+                    {
+                        try { LeftRaceNumBox?.Focus(); } catch { }
+                        _categoryTyped = string.Empty;
+                        UpdateCategoryTypedDisplay();
+                    };
+                }
+            }
+            catch { }
+        }
+
+        // typed-digit buffer for category popup
+        private string _categoryTyped = string.Empty;
+
+        // helper to update the visible typed display in the popup
+        private void UpdateCategoryTypedDisplay()
+        {
+            try
+            {
+                if (CategoryTypedDisplay != null)
+                {
+                    // show typed buffer (pad with underscore for missing digits)
+                    if (_categoryTyped.Length == 0)
+                        CategoryTypedDisplay.Text = "__";
+                    else if (_categoryTyped.Length == 1)
+                        CategoryTypedDisplay.Text = _categoryTyped + "_";
+                    else
+                        CategoryTypedDisplay.Text = _categoryTyped;
+                }
+            }
+            catch { }
+        }
+
+        // highlight matching button for current typed buffer (if any)
+        private void HighlightMatchingButton()
+        {
+            try
+            {
+                if (CategoryGrid == null) return;
+                // iterate over buttons and set Background/Opacity to indicate selection
+                foreach (var child in CategoryGrid.Children)
+                {
+                    if (child is Button btn && btn.Content is string content)
+                    {
+                        // assume items are like "01 - Name" so compare first two chars
+                        var id = content.Length >= 2 ? content.Substring(0, 2) : string.Empty;
+                        if (!string.IsNullOrEmpty(id) && id == _categoryTyped)
+                        {
+                            // high-contrast orange highlight + thicker border
+                            btn.Background = new SolidColorBrush(Color.Parse("#FF8C00")); // orange
+                            btn.Foreground = Brushes.Black;
+                            try { btn.BorderBrush = new SolidColorBrush(Color.Parse("#FFA500")); btn.BorderThickness = new Avalonia.Thickness(2); } catch { }
+                        }
+                        else
+                        {
+                            // reset style for non-selected buttons
+                            btn.Background = new SolidColorBrush(Color.Parse("#2D2D30"));
+                            btn.Foreground = Brushes.White;
+                            try { btn.BorderBrush = new SolidColorBrush(Color.Parse("#444444")); btn.BorderThickness = new Avalonia.Thickness(1); } catch { }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // when two digits are typed (or enter pressed) select matching category if found
+        private void TrySelectCategoryFromTyped()
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(_categoryTyped) || CategoryGrid == null) return;
+
+                foreach (var child in CategoryGrid.Children)
+                {
+                    if (child is Button btn && btn.Content is string content && content.Length >= 2)
+                    {
+                        if (content.Substring(0, 2) == _categoryTyped)
+                        {
+                            // select this category
+                            if (_viewModel != null)
+                            {
+                                _viewModel.EnterPairSelectedCategComboText = content;
+                            }
+
+                            // close popup
+                            if (CategoryPopup != null) CategoryPopup.IsOpen = false;
+                            // clear typed buffer
+                            _categoryTyped = string.Empty;
+                            UpdateCategoryTypedDisplay();
+                            return;
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
         private void OnWindowKeyDown(object? sender, KeyEventArgs e)
@@ -79,6 +212,67 @@ namespace PulsarUI.Views
             if (e.Key == Key.F12)
             {
                 ToggleCategoryPopup();
+                e.Handled = true;
+                return;
+            }
+
+            // If the category popup is open, handle digit input for selecting categories
+            if (CategoryPopup != null && CategoryPopup.IsOpen)
+            {
+                // handle Escape to close and Backspace to remove
+                if (e.Key == Key.Escape)
+                {
+                    _categoryTyped = string.Empty;
+                    UpdateCategoryTypedDisplay();
+                    if (CategoryPopup != null) CategoryPopup.IsOpen = false;
+                    e.Handled = true;
+                    return;
+                }
+
+                if (e.Key == Key.Back)
+                {
+                    if (_categoryTyped.Length > 0) _categoryTyped = _categoryTyped.Substring(0, _categoryTyped.Length - 1);
+                    UpdateCategoryTypedDisplay();
+                    HighlightMatchingButton();
+                    e.Handled = true;
+                    return;
+                }
+
+                // accept Enter as commit when we have two digits
+                if (e.Key == Key.Enter || e.Key == Key.Return)
+                {
+                    if (_categoryTyped.Length == 2)
+                    {
+                        TrySelectCategoryFromTyped();
+                        e.Handled = true;
+                        return;
+                    }
+                }
+
+                // handle digit keys
+                var sym = e.KeySymbol ?? string.Empty;
+                if (sym.Length == 1 && char.IsDigit(sym[0]))
+                {
+                    if (_categoryTyped.Length < 2)
+                    {
+                        // append until we have two digits
+                        _categoryTyped += sym;
+                    }
+                    else
+                    {
+                        // already had two digits -> start a new entry with the newly typed digit
+                        _categoryTyped = sym;
+                    }
+
+                    // update UI and highlight matching button, but DO NOT auto-select; wait for Enter
+                    UpdateCategoryTypedDisplay();
+                    HighlightMatchingButton();
+
+                    e.Handled = true;
+                    return;
+                }
+
+                // consume other keys while popup open
                 e.Handled = true;
                 return;
             }
@@ -103,18 +297,18 @@ namespace PulsarUI.Views
             else
             {
                 // Fallback: inspect KeySymbol (char) which is more consistent across platforms for +/ -
-                var sym = e.KeySymbol ?? string.Empty;
-                if (sym == "+")
+                var sym2 = e.KeySymbol ?? string.Empty;
+                if (sym2 == "+")
                 {
                     handled = true;
                     AdjustRound(1);
                 }
-                else if (sym == "-")
+                else if (sym2 == "-")
                 {
                     handled = true;
                     AdjustRound(-1);
                 }
-                else if (sym == "=" && (e.KeyModifiers & KeyModifiers.Shift) != 0)
+                else if (sym2 == "=" && (e.KeyModifiers & KeyModifiers.Shift) != 0)
                 {
                     // Shift+ = often produces + on some keyboards
                     handled = true;
@@ -390,7 +584,18 @@ namespace PulsarUI.Views
 
                 if (CategoryPopup.IsOpen)
                 {
+                    // clear typed buffer and update visible display when opening
+                    _categoryTyped = string.Empty;
+                    UpdateCategoryTypedDisplay();
+
                     BuildCategoryGrid();
+
+                    // Attempt to set keyboard focus to the invisible capture box so keys go to the popup
+                    try
+                    {
+                        CategoryCaptureBox?.Focus();
+                    }
+                    catch { }
                 }
             }
             catch

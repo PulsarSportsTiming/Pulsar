@@ -12,6 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 using System.Threading.Tasks;
 using System.Collections.ObjectModel;
 using Microsoft.Extensions.Configuration;
+using System.IO;
 
 namespace PulsarUI.ViewModels
 {
@@ -162,10 +163,10 @@ namespace PulsarUI.ViewModels
         [ObservableProperty] private FinishLine? _selectedFinishLine;
         partial void OnSelectedFinishLineChanged(FinishLine? value)
         {
-            if (value == null || FinishList == null || EnterPairQueueCategory == null) return;
-            var idx = FinishList.IndexOf(value);
-            if (idx >= 0 && EnterPairQueueCategory.Finish != idx)
-                EnterPairQueueCategory.Finish = idx;
+            if (value == null || EnterPairQueueCategory == null) return;
+            // Store the FinishLine Id on the queue item (use Id-based references)
+            if (EnterPairQueueCategory.Finish != value.Id)
+                EnterPairQueueCategory.Finish = value.Id;
         }
 
         // Racer Info Properties
@@ -194,13 +195,15 @@ namespace PulsarUI.ViewModels
                 QueuePairRightTreeText = string.Empty;
                 return;
             }
+            // Log constructor entry for diagnostics
+            LocalLog("MainWindowViewModel ctor start");
              // Date/Time Display
              var now = DateTime.Now;
              var msToNextSecond = 1000 - now.Millisecond;
 
              Task.Delay(msToNextSecond).ContinueWith(_ => { StartClock(); });
 
-            // Build configuration from appsettings.json and appsettings.local.json (local overrides)
+             // Build configuration from appsettings.json and appsettings.local.json (local overrides)
             var configuration = new ConfigurationBuilder()
                 .SetBasePath(AppContext.BaseDirectory)
                 .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
@@ -214,11 +217,13 @@ namespace PulsarUI.ViewModels
                                      ?? "Data Source=/home/david/PulsarDB.db";
 
             _databaseService = new DatabaseService(dbConnectionString);
+            // Launch async loads and log that we started them
             _ = LoadFinishLinesAsync();
             _ = LoadTreeTypesAsync();
             _ = LoadCategoriesAsync();
+            LocalLog("Launched LoadFinishLines/LoadTreeTypes/LoadCategories tasks");
 
-            _mqttService = new MqttService();
+             _mqttService = new MqttService();
 
             EnterPairQueueCategory = new CategQueueItem
             {
@@ -425,9 +430,9 @@ namespace PulsarUI.ViewModels
             // Sync selected finish item to numeric finish index
             if (FinishList != null && FinishList.Count > 0)
             {
-                SelectedFinishLine = (EnterPairQueueCategory.Finish >= 0 && EnterPairQueueCategory.Finish < FinishList.Count)
-                    ? FinishList[EnterPairQueueCategory.Finish]
-                    : FinishList.FirstOrDefault();
+                // Treat EnterPairQueueCategory.Finish as a FinishLine.Id; find matching FinishLine by Id
+                var byId = FinishList.FirstOrDefault(f => f != null && f.Id == EnterPairQueueCategory.Finish);
+                SelectedFinishLine = byId ?? FinishList.FirstOrDefault();
             }
 
             // Ensure CategoryDetails is attached when the Category id changes or the categories list is available
@@ -458,13 +463,38 @@ namespace PulsarUI.ViewModels
         {
             if (QueuePairQueueCategory == null)
                 return;
-            if (FinishList != null && FinishList.Count > 0)
+            // Update textual finish and mode for the queued pair based on the stored Finish id
+            string finishDesc = string.Empty;
+            if (FinishList != null && QueuePairQueueCategory != null)
             {
-                // Optionally keep a queue-pair selected finish property; for now keep the textual binding updated elsewhere
+                var fl = FinishList.FirstOrDefault(f => f != null && f.Id == QueuePairQueueCategory.Finish);
+                if (fl != null) finishDesc = fl.Description ?? string.Empty;
+                else if (QueuePairQueueCategory?.CategoryDetails != null)
+                {
+                    var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == QueuePairQueueCategory.CategoryDetails.Finish);
+                    if (fl2 != null) finishDesc = fl2.Description ?? string.Empty;
+                }
             }
+            QueuePairFinishText = finishDesc;
+
+            // Debug: publish the finish id values and resolved description so we can trace mismatch
+            try
+            {
+                var msg = $"QueuePair DEBUG: EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}, SelectedFinishId={SelectedFinishLine?.Id}, CategoryDetails.Finish={EnterPairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{QueuePairFinishText}\"";
+                _ = _mqttService.PublishMqtt("pulsarui/debug", msg);
+                LocalLog(msg);
+            }
+            catch { }
+
+            string modeName = (ModeList != null && QueuePairQueueCategory != null && QueuePairQueueCategory.Mode >= 0 && QueuePairQueueCategory.Mode < ModeList.Count)
+                ? ModeList[QueuePairQueueCategory.Mode]
+                : (ModeList?.FirstOrDefault() ?? string.Empty);
+            QueuePairModeText = $"{modeName} Round {QueuePairQueueCategory?.Round ?? 0}";
+
             if (IsCategQueueItemDifferent(QueuePairQueueCategory, _lastSentQueuePairQueueCategory))
             {
-                _ = _mqttService.PubQueueCategAsync(QueuePairQueueCategory);
+                if (QueuePairQueueCategory != null)
+                    _ = _mqttService.PubQueueCategAsync(QueuePairQueueCategory);
                 _lastSentQueuePairQueueCategory = QueuePairQueueCategory.Clone(QueuePairQueueCategory.QueueIndex);
             }
         }
@@ -473,9 +503,38 @@ namespace PulsarUI.ViewModels
         {
             if (EngagePairQueueCategory == null)
                 return;
+            // Update textual finish and mode for the engaged pair based on stored Finish id
+            string finishDesc = string.Empty;
+            if (FinishList != null && EngagePairQueueCategory != null)
+            {
+                var fl = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.Finish);
+                if (fl != null) finishDesc = fl.Description ?? string.Empty;
+                else if (EngagePairQueueCategory?.CategoryDetails != null)
+                {
+                    var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.CategoryDetails.Finish);
+                    if (fl2 != null) finishDesc = fl2.Description ?? string.Empty;
+                }
+            }
+            EngagePairFinishText = finishDesc;
+
+            // Debug: publish engage finish info
+            try
+            {
+                var msg2 = $"EngagePair DEBUG: EngagePairQueueCategory.Finish={EngagePairQueueCategory?.Finish}, CategoryDetails.Finish={EngagePairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{EngagePairFinishText}\", QueuePairFinishText=\"{QueuePairFinishText}\"";
+                _ = _mqttService.PublishMqtt("pulsarui/debug", msg2);
+                LocalLog(msg2);
+            }
+            catch { }
+
+            string modeName = (ModeList != null && EngagePairQueueCategory != null && EngagePairQueueCategory.Mode >= 0 && EngagePairQueueCategory.Mode < ModeList.Count)
+                ? ModeList[EngagePairQueueCategory.Mode]
+                : (ModeList?.FirstOrDefault() ?? string.Empty);
+            EngagePairModeText = $"{modeName} Round {EngagePairQueueCategory?.Round ?? 0}";
+
             if (IsCategQueueItemDifferent(EngagePairQueueCategory, _lastSentEngagePairQueueCategory))
             {
-                _ = _mqttService.PubQueueCategAsync(EngagePairQueueCategory);
+                if (EngagePairQueueCategory != null)
+                    _ = _mqttService.PubQueueCategAsync(EngagePairQueueCategory);
                 _lastSentEngagePairQueueCategory = EngagePairQueueCategory.Clone(EngagePairQueueCategory.QueueIndex);
             }
         }
@@ -649,10 +708,34 @@ namespace PulsarUI.ViewModels
             var category = Categories?.Find(c => c?.Id == EnterPairQueueCategory.Category);
             if (category == null) return;
             QueuePairCategText = category.Name;
-            // Populate textual finish and mode safely (avoid using commented-out stubs)
-            QueuePairFinishText = (FinishList != null && EnterPairQueueCategory != null && EnterPairQueueCategory.Finish >= 0 && EnterPairQueueCategory.Finish < FinishList.Count)
-                ? FinishList[EnterPairQueueCategory.Finish].Description
-                : string.Empty;
+            // Populate textual finish robustly: prefer SelectedFinishLine, then lookup by EnterPairQueueCategory.Finish as an Id,
+            // then fall back to the category's Finish id stored in CategoryDetails.
+            string finishDesc = string.Empty;
+            if (SelectedFinishLine != null)
+            {
+                finishDesc = SelectedFinishLine.Description ?? string.Empty;
+            }
+            else if (FinishList != null && EnterPairQueueCategory != null)
+            {
+                var fl = FinishList.FirstOrDefault(f => f != null && f.Id == EnterPairQueueCategory.Finish);
+                if (fl != null) finishDesc = fl.Description ?? string.Empty;
+                else if (EnterPairQueueCategory?.CategoryDetails != null)
+                {
+                    var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == EnterPairQueueCategory.CategoryDetails.Finish);
+                    if (fl2 != null) finishDesc = fl2.Description ?? string.Empty;
+                }
+            }
+
+            QueuePairFinishText = finishDesc;
+
+            // Debug: publish the finish id values and resolved description so we can trace mismatch
+            try
+            {
+                var msg = $"QueuePair DEBUG: EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}, SelectedFinishId={SelectedFinishLine?.Id}, CategoryDetails.Finish={EnterPairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{QueuePairFinishText}\"";
+                _ = _mqttService.PublishMqtt("pulsarui/debug", msg);
+                LocalLog(msg);
+            }
+            catch { }
 
             // Null-safe mode text construction to avoid nullable warnings
             string modeName = (ModeList != null && EnterPairQueueCategory != null && EnterPairQueueCategory.Mode >= 0 && EnterPairQueueCategory.Mode < ModeList.Count)
@@ -660,8 +743,16 @@ namespace PulsarUI.ViewModels
                 : (ModeList?.FirstOrDefault() ?? string.Empty);
 
             QueuePairModeText = $"{modeName} Round {EnterPairQueueCategory?.Round ?? 0}";
-            QueuePairQueueCategory = EnterPairQueueCategory.Clone(1);
-            EnterPairCategText = category.Name;
+            // Clone the enter-pair queue item for queued pair and ensure the Finish id is explicit
+            var queuedClone = EnterPairQueueCategory.Clone(1);
+            // The UI's SelectedFinishLine is the authoritative selection for the Enter pair; ensure the queued clone stores that Id
+            queuedClone.Finish = SelectedFinishLine?.Id ?? EnterPairQueueCategory.Finish;
+            // Also update the EnterPairQueueCategory.Finish so handlers/debugging see a consistent value
+            EnterPairQueueCategory.Finish = queuedClone.Finish;
+            // Assign the prepared clone so the property setter/handler sees the correct Finish id
+            if (queuedClone != null)
+                QueuePairQueueCategory = queuedClone;
+             EnterPairCategText = category.Name;
 
             // Suppress RaceEntry Tree publishes while we ClearAll and set defaults
             _suppressRaceEntryPublish = true;
@@ -732,6 +823,8 @@ namespace PulsarUI.ViewModels
             else
             {
                 category = Categories?.Find(c => c?.Id == EnterPairQueueCategory.Category);
+                // Ensure the EnterPairQueueCategory carries the selected Finish id before we clone it for engagement
+                EnterPairQueueCategory.Finish = SelectedFinishLine?.Id ?? EnterPairQueueCategory.Finish;
                 EngagePairQueueCategory = EnterPairQueueCategory.Clone(2);
 
                 // Suppress RaceEntry Tree publishes while we ClearAll and set defaults for EnterRacers
@@ -746,6 +839,47 @@ namespace PulsarUI.ViewModels
                 // After clearing, set defaults below (still suppressed until after this block)
             }
             if (category == null) return;
+
+            // Compute and set the textual Finish and Mode for the engaged pair so UI updates appropriately
+            string engageFinishDesc = string.Empty;
+            if (EngagePairQueueCategory != null)
+            {
+                // Prefer a direct lookup by the queue category's Finish id
+                if (FinishList != null)
+                {
+                    var fl = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.Finish);
+                    if (fl != null) engageFinishDesc = fl.Description ?? string.Empty;
+                }
+
+                // If still empty, prefer CategoryDetails' Finish id
+                if (string.IsNullOrEmpty(engageFinishDesc) && EngagePairQueueCategory.CategoryDetails != null && FinishList != null)
+                {
+                    var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.CategoryDetails.Finish);
+                    if (fl2 != null) engageFinishDesc = fl2.Description ?? string.Empty;
+                }
+
+                // Finally fall back to previously computed QueuePairFinishText when engaging from queue
+                if (string.IsNullOrEmpty(engageFinishDesc) && queueHasEntries)
+                {
+                    engageFinishDesc = QueuePairFinishText ?? string.Empty;
+                }
+            }
+            EngagePairFinishText = engageFinishDesc;
+
+            // Debug: publish engage finish info
+            try
+            {
+                var msg2 = $"EngagePair DEBUG: EngagePairQueueCategory.Finish={EngagePairQueueCategory?.Finish}, CategoryDetails.Finish={EngagePairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{EngagePairFinishText}\", QueuePairFinishText=\"{QueuePairFinishText}\"";
+                _ = _mqttService.PublishMqtt("pulsarui/debug", msg2);
+                LocalLog(msg2);
+            }
+            catch { }
+
+            // Set EngagePairModeText similarly to QueuePairModeText so UI shows the engaged mode/round
+            string engageModeName = (ModeList != null && EngagePairQueueCategory != null && EngagePairQueueCategory.Mode >= 0 && EngagePairQueueCategory.Mode < ModeList.Count)
+                ? ModeList[EngagePairQueueCategory.Mode]
+                : (ModeList?.FirstOrDefault() ?? string.Empty);
+            EngagePairModeText = $"{engageModeName} Round {EngagePairQueueCategory?.Round ?? 0}";
 
             // After engaging, only reset the Enter Pair UI lanes to the EnterPair category default
             // when we engaged from the Enter pair (i.e., no queued entries). Do not clear EnterRacers
@@ -788,7 +922,8 @@ namespace PulsarUI.ViewModels
             SystemEngaged = true;
             UpdateButtonStatuses();
             // Publish run configuration (use EngagedRacers collection; new overload handles left/right)
-            _ = _mqttService.PubRunConfigAsync(EngagePairQueueCategory, EngagedRacers);
+            if (EngagePairQueueCategory != null)
+                _ = _mqttService.PubRunConfigAsync(EngagePairQueueCategory, EngagedRacers);
         }
 
         [RelayCommand]
@@ -914,10 +1049,56 @@ namespace PulsarUI.ViewModels
                 .ToList();
 
             // Ensure the selected combo text is initialized now that the category items exist
-            EnterPairSelectedCategComboText = CategComboBoxItems.FirstOrDefault();
+            // Prefer selecting startup category by the 2-digit Order parsed from EnterPairSelectedCategComboText
+            Category? startupCategory = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(EnterPairSelectedCategComboText) && EnterPairSelectedCategComboText.Trim().Length >= 2)
+                {
+                    var t = EnterPairSelectedCategComboText.Trim();
+                    if (int.TryParse(t.Substring(0, 2), out var parsedOrder))
+                    {
+                        startupCategory = Categories.FirstOrDefault(c => c != null && c.Order == parsedOrder);
+                    }
+                }
+            }
+            catch { }
 
-            await _mqttService.PublishMqtt("pulsarui/sysmsg","Loading categories...");
-        }
+            // Fallback: prefer matching Category.Id if no Order match, else first category
+            if (startupCategory == null)
+                startupCategory = Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory?.Category) ?? Categories.FirstOrDefault();
+             if (startupCategory != null)
+             {
+                 EnterPairQueueCategory.CategoryDetails = startupCategory;
+                 EnterPairQueueCategory.Category = startupCategory.Id;
+                 EnterPairQueueCategory.Finish = startupCategory.Finish;
+                 EnterPairCategText = startupCategory.Name;
+                 EnterPairSelectedCategComboText = $"{startupCategory.Order.ToString("D2")} - {startupCategory.Name}";
+
+                 // If finish lines are already loaded, ensure SelectedFinishLine matches the category's finish id
+                 if (FinishList != null && FinishList.Count > 0)
+                 {
+                     var finishById = FinishList.FirstOrDefault(f => f != null && f.Id == startupCategory.Finish);
+                     if (finishById != null)
+                         SelectedFinishLine = finishById;
+                 }
+             }
+             else
+             {
+                 EnterPairSelectedCategComboText = CategComboBoxItems.FirstOrDefault();
+             }
+
+             // Publish/log a small startup message for diagnostics
+             try
+             {
+                 var msg = $"Loaded {Categories.Count} categories; startupCategoryId={EnterPairQueueCategory?.Category}; selectedFinishId={SelectedFinishLine?.Id}";
+                 _ = _mqttService.PublishMqtt("pulsarui/debug", msg);
+                 LocalLog(msg);
+             }
+             catch { }
+
+             InitializeStartupCategoryAndFinish();
+         }
 
         private async Task LoadTreeTypesAsync()
         {
@@ -957,6 +1138,53 @@ namespace PulsarUI.ViewModels
             // Initialize SelectedFinishLine from EnterPairQueueCategory's Finish index or CategoryDetails
             if (FinishList != null && FinishList.Count > 0)
             {
+                // Compatibility migration: some persisted/legacy values may have stored Finish as a list index
+                // rather than the canonical FinishLine.Id. Detect that case and convert to the correct Id.
+                int MapToFinishId(int storedValue)
+                {
+                    if (FinishList.Any(f => f.Id == storedValue))
+                        return storedValue; // already an Id
+                    if (storedValue >= 0 && storedValue < FinishList.Count)
+                        return FinishList[storedValue].Id; // treat as index -> map to Id
+                    return storedValue; // leave as-is if it doesn't match either
+                }
+
+                // Apply migration to any queued/engaged CategQueueItems so UI/logic uses Ids consistently
+                try
+                {
+                    if (EnterPairQueueCategory != null)
+                    {
+                        var before = EnterPairQueueCategory.Finish;
+                        var after = MapToFinishId(before);
+                        if (before != after)
+                        {
+                            EnterPairQueueCategory.Finish = after;
+                            await _mqttService.PublishMqtt("pulsarui/debug", $"MIGRATE: EnterPairQueueCategory.Finish {before} -> {after}");
+                        }
+                    }
+                    if (QueuePairQueueCategory != null)
+                    {
+                        var before = QueuePairQueueCategory.Finish;
+                        var after = MapToFinishId(before);
+                        if (before != after)
+                        {
+                            QueuePairQueueCategory.Finish = after;
+                            await _mqttService.PublishMqtt("pulsarui/debug", $"MIGRATE: QueuePairQueueCategory.Finish {before} -> {after}");
+                        }
+                    }
+                    if (EngagePairQueueCategory != null)
+                    {
+                        var before = EngagePairQueueCategory.Finish;
+                        var after = MapToFinishId(before);
+                        if (before != after)
+                        {
+                            EngagePairQueueCategory.Finish = after;
+                            await _mqttService.PublishMqtt("pulsarui/debug", $"MIGRATE: EngagePairQueueCategory.Finish {before} -> {after}");
+                        }
+                    }
+                }
+                catch { /* best-effort migration; swallow errors to avoid blocking startup */ }
+
                 // If a category is already selected and has a Finish id, prefer that
                 if (EnterPairQueueCategory?.CategoryDetails != null)
                 {
@@ -965,16 +1193,118 @@ namespace PulsarUI.ViewModels
                     if (finishById != null)
                     {
                         SelectedFinishLine = finishById;
+                        // Refresh any derived textual bindings that rely on FinishList
+                        QueuePairQueueCategoryHandler(QueuePairQueueCategory, new PropertyChangedEventArgs(""));
+                        EngagePairQueueCategoryHandler(EngagePairQueueCategory, new PropertyChangedEventArgs(""));
+
+                        // Debug: publish finish list and initial mapping
+                        try
+                        {
+                            var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.Description}"));
+                            var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
+                            _ = _mqttService.PublishMqtt("pulsarui/debug", initialMapping);
+                            LocalLog(initialMapping);
+                        }
+                        catch { }
+
                         return;
                     }
                 }
 
-                if (EnterPairQueueCategory != null && EnterPairQueueCategory.Finish >= 0 && EnterPairQueueCategory.Finish < FinishList.Count)
-                    SelectedFinishLine = FinishList[EnterPairQueueCategory.Finish];
-                else
-                    SelectedFinishLine = FinishList.FirstOrDefault();
+                // If EnterPairQueueCategory.Finish refers to a FinishLine.Id, find by Id
+                if (EnterPairQueueCategory != null)
+                {
+                    var findById = FinishList.FirstOrDefault(f => f.Id == EnterPairQueueCategory.Finish);
+                    if (findById != null)
+                    {
+                        SelectedFinishLine = findById;
+                        QueuePairQueueCategoryHandler(QueuePairQueueCategory, new PropertyChangedEventArgs(""));
+                        EngagePairQueueCategoryHandler(EngagePairQueueCategory, new PropertyChangedEventArgs(""));
+
+                        try
+                        {
+                            var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.Description}"));
+                            var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
+                            _ = _mqttService.PublishMqtt("pulsarui/debug", initialMapping);
+                            LocalLog(initialMapping);
+                        }
+                        catch { }
+
+                        return;
+                    }
+                }
+                SelectedFinishLine = FinishList.FirstOrDefault();
+
+                try
+                {
+                    var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.Description}"));
+                    var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
+                    _ = _mqttService.PublishMqtt("pulsarui/debug", initialMapping);
+                    LocalLog(initialMapping);
+                }
+                catch { }
+
+                QueuePairQueueCategoryHandler(QueuePairQueueCategory, new PropertyChangedEventArgs(""));
+                EngagePairQueueCategoryHandler(EngagePairQueueCategory, new PropertyChangedEventArgs(""));
+                // In case categories finished loading earlier/later, ensure startup selection is initialized
+                InitializeStartupCategoryAndFinish();
             }
         }
+
+        private void InitializeStartupCategoryAndFinish()
+        {
+            try
+            {
+                if (Categories == null || Categories.Count == 0) return;
+                if (EnterPairQueueCategory == null) return;
+
+                // Prefer selecting startup category by the two-digit Order parsed from EnterPairSelectedCategComboText,
+                // then fall back to the existing numeric Category id, then the first category.
+                Category? startupCategory = null;
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(EnterPairSelectedCategComboText) && EnterPairSelectedCategComboText.Trim().Length >= 2)
+                    {
+                        var t = EnterPairSelectedCategComboText.Trim();
+                        if (int.TryParse(t.Substring(0, 2), out var parsedOrder))
+                            startupCategory = Categories.FirstOrDefault(c => c != null && c.Order == parsedOrder);
+                    }
+                }
+                catch { }
+
+                if (startupCategory == null)
+                    startupCategory = Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory.Category) ?? Categories.FirstOrDefault();
+                 if (startupCategory != null)
+                 {
+                     EnterPairQueueCategory.CategoryDetails = startupCategory;
+                     EnterPairQueueCategory.Category = startupCategory.Id;
+                     // Ensure the queue item's Finish id matches the category's configured finish
+                     EnterPairQueueCategory.Finish = startupCategory.Finish;
+                     EnterPairCategText = startupCategory.Name;
+                     EnterPairSelectedCategComboText = $"{startupCategory.Order.ToString("D2")} - {startupCategory.Name}";
+
+                     // If finish lines are loaded, ensure SelectedFinishLine matches the category's finish id
+                     if (FinishList != null && FinishList.Count > 0)
+                     {
+                         var finishById = FinishList.FirstOrDefault(f => f != null && f.Id == startupCategory.Finish);
+                         if (finishById != null)
+                             SelectedFinishLine = finishById;
+                     }
+
+                     // Refresh derived textual displays
+                     QueuePairQueueCategoryHandler(QueuePairQueueCategory, new PropertyChangedEventArgs(""));
+                     EngagePairQueueCategoryHandler(EngagePairQueueCategory, new PropertyChangedEventArgs(""));
+
+                     var msg = $"Initialized startupCategoryId={EnterPairQueueCategory.Category}; selectedFinishId={SelectedFinishLine?.Id}";
+                     try { _ = _mqttService.PublishMqtt("pulsarui/debug", msg); } catch { }
+                     LocalLog(msg);
+                 }
+             }
+             catch (Exception ex)
+             {
+                 LocalLog($"InitializeStartupCategoryAndFinish error: {ex.Message}");
+             }
+         }
 
         // F5 (Queue) is enabled if any EnterRacers have a RaceNumber and all QueuedRacers are empty
         public bool IsF5Enabled =>
@@ -999,6 +1329,15 @@ namespace PulsarUI.ViewModels
             OnPropertyChanged(nameof(IsF5Enabled));
             OnPropertyChanged(nameof(IsF10Enabled));
             OnPropertyChanged(nameof(IsF11Enabled));
+        }
+
+        private void LocalLog(string msg)
+        {
+            try
+            {
+                File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n");
+            }
+            catch { }
         }
     }
 }

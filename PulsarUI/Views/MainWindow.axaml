@@ -178,7 +178,7 @@
                     <Label Grid.Column="0" Grid.Row="2" Classes="StandardLabel" HorizontalAlignment="Right" Content="Finish" />
                     <Label Grid.Column="1" Grid.Row="2" Classes="StandardLabel" Content="—" />
                     <!--<Label Grid.Column="2" Grid.Row="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding EngagePairFinishLineText}" />-->
-                    <Label Grid.Column="2" Grid.Row="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="402.336m"/>
+                    <Label Grid.Column="2" Grid.Row="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{Binding EngagePairFinishText}"/>
                     <Label Grid.Column="0" Grid.Row="3" Classes="StandardLabel" HorizontalAlignment="Right" Content="Display" />
                     <Label Grid.Column="1" Grid.Row="3" Classes="StandardLabel" Content="—" />
                     <StackPanel Grid.Column="2" Grid.Row="3" Orientation="Horizontal">
@@ -487,7 +487,23 @@
                         HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel>
                         <TextBlock Text="Categories" FontWeight="Bold" FontSize="18" Margin="0,0,0,8" HorizontalAlignment="Center" Foreground="White" />
-                        <ScrollViewer Width="760" Height="640" Background="#1E1E1E" VerticalScrollBarVisibility="Hidden">
+    
+                        <!-- Visible typed-digit display and short instruction -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8">
+                            <Border Background="#2B2B2B" Padding="8,6" CornerRadius="4" BorderBrush="#666666" BorderThickness="1" HorizontalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="Type: " Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBlock x:Name="CategoryTypedDisplay" Text="" Foreground="White" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- invisible focus-capture box so the popup can receive keyboard focus reliably -->
+                            <TextBox x:Name="CategoryCaptureBox" Width="1" Height="1" Opacity="0" Margin="4,0,0,0" IsTabStop="False" />
+
+                            <TextBlock Text="  (type 2 digits to select, Esc to cancel)" Foreground="#BBBBBB" VerticalAlignment="Center" Margin="10,0,0,0" />
+                        </StackPanel>
+
+                        <ScrollViewer Width="760" Height="720" Background="#1E1E1E" VerticalScrollBarVisibility="Hidden">
                             <Grid x:Name="CategoryGrid" Margin="6" />
                         </ScrollViewer>
                      </StackPanel>
