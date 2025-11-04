@@ -27,6 +27,10 @@ namespace PulsarUI.ViewModels
 
         private readonly MqttService _mqttService = default!;
 
+        // Enable/disable debug publishing and local logging (toggle while diagnosing)
+        private readonly bool _enableDebugPublish = false;
+        private readonly bool _enableLocalLog = false;
+
         private string? _lastConfirmedRaceNum;
 
         // Provide async commands so we avoid "async void" lambdas and analyzer warnings; initialized in constructor
@@ -129,6 +133,7 @@ namespace PulsarUI.ViewModels
         [ObservableProperty] private List<string> _modeList = new();
         [ObservableProperty] private string? _queuePairModeText;
         [ObservableProperty] private string? _engagePairModeText;
+        [ObservableProperty] private string? _engagePairStartModeText;
 
         // Tree Type Properties
         [ObservableProperty] private List<TreeType> _treeList = new();
@@ -465,26 +470,32 @@ namespace PulsarUI.ViewModels
                 return;
             // Update textual finish and mode for the queued pair based on the stored Finish id
             string finishDesc = string.Empty;
-            if (FinishList != null && QueuePairQueueCategory != null)
-            {
-                var fl = FinishList.FirstOrDefault(f => f != null && f.Id == QueuePairQueueCategory.Finish);
-                if (fl != null) finishDesc = fl.Description ?? string.Empty;
-                else if (QueuePairQueueCategory?.CategoryDetails != null)
-                {
-                    var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == QueuePairQueueCategory.CategoryDetails.Finish);
-                    if (fl2 != null) finishDesc = fl2.Description ?? string.Empty;
-                }
-            }
-            QueuePairFinishText = finishDesc;
 
-            // Debug: publish the finish id values and resolved description so we can trace mismatch
-            try
+            // If the queued category appears to be the uninitialized/default placeholder (no category selected
+            // and finish id is the default 0), don't resolve a FinishLine and leave the UI blank. This avoids
+            // showing a real FinishLine that happens to have Id==0 (e.g. "100m") at startup.
+            if ((QueuePairQueueCategory.Category == 0 || QueuePairQueueCategory.CategoryDetails == null) && QueuePairQueueCategory.Finish == 0)
             {
-                var msg = $"QueuePair DEBUG: EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}, SelectedFinishId={SelectedFinishLine?.Id}, CategoryDetails.Finish={EnterPairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{QueuePairFinishText}\"";
-                _ = _mqttService.PublishMqtt("pulsarui/debug", msg);
-                LocalLog(msg);
+                QueuePairFinishText = string.Empty;
             }
-            catch { }
+            else
+            {
+                if (FinishList != null && QueuePairQueueCategory != null)
+                {
+                    var fl = FinishList.FirstOrDefault(f => f != null && f.Id == QueuePairQueueCategory.Finish);
+                    if (fl != null) finishDesc = fl.Description ?? string.Empty;
+                    else if (QueuePairQueueCategory?.CategoryDetails != null)
+                    {
+                        var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == QueuePairQueueCategory.CategoryDetails.Finish);
+                        if (fl2 != null) finishDesc = fl2.Description ?? string.Empty;
+                    }
+                }
+                QueuePairFinishText = finishDesc;
+
+                // Debug: publish the finish id values and resolved description so we can trace mismatch
+                var dbgMsg = $"QueuePair DEBUG: EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}, SelectedFinishId={SelectedFinishLine?.Id}, CategoryDetails.Finish={EnterPairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{QueuePairFinishText}\"";
+                MaybeDebug(dbgMsg);
+            }
 
             string modeName = (ModeList != null && QueuePairQueueCategory != null && QueuePairQueueCategory.Mode >= 0 && QueuePairQueueCategory.Mode < ModeList.Count)
                 ? ModeList[QueuePairQueueCategory.Mode]
@@ -518,13 +529,8 @@ namespace PulsarUI.ViewModels
             EngagePairFinishText = finishDesc;
 
             // Debug: publish engage finish info
-            try
-            {
-                var msg2 = $"EngagePair DEBUG: EngagePairQueueCategory.Finish={EngagePairQueueCategory?.Finish}, CategoryDetails.Finish={EngagePairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{EngagePairFinishText}\", QueuePairFinishText=\"{QueuePairFinishText}\"";
-                _ = _mqttService.PublishMqtt("pulsarui/debug", msg2);
-                LocalLog(msg2);
-            }
-            catch { }
+            var dbgMsg2 = $"EngagePair DEBUG: EngagePairQueueCategory.Finish={EngagePairQueueCategory?.Finish}, CategoryDetails.Finish={EngagePairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{EngagePairFinishText}\", QueuePairFinishText=\"{QueuePairFinishText}\"";
+            MaybeDebug(dbgMsg2);
 
             string modeName = (ModeList != null && EngagePairQueueCategory != null && EngagePairQueueCategory.Mode >= 0 && EngagePairQueueCategory.Mode < ModeList.Count)
                 ? ModeList[EngagePairQueueCategory.Mode]
@@ -729,13 +735,8 @@ namespace PulsarUI.ViewModels
             QueuePairFinishText = finishDesc;
 
             // Debug: publish the finish id values and resolved description so we can trace mismatch
-            try
-            {
-                var msg = $"QueuePair DEBUG: EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}, SelectedFinishId={SelectedFinishLine?.Id}, CategoryDetails.Finish={EnterPairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{QueuePairFinishText}\"";
-                _ = _mqttService.PublishMqtt("pulsarui/debug", msg);
-                LocalLog(msg);
-            }
-            catch { }
+            var msg = $"QueuePair DEBUG: EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}, SelectedFinishId={SelectedFinishLine?.Id}, CategoryDetails.Finish={EnterPairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{QueuePairFinishText}\"";
+            MaybeDebug(msg);
 
             // Null-safe mode text construction to avoid nullable warnings
             string modeName = (ModeList != null && EnterPairQueueCategory != null && EnterPairQueueCategory.Mode >= 0 && EnterPairQueueCategory.Mode < ModeList.Count)
@@ -867,13 +868,8 @@ namespace PulsarUI.ViewModels
             EngagePairFinishText = engageFinishDesc;
 
             // Debug: publish engage finish info
-            try
-            {
-                var msg2 = $"EngagePair DEBUG: EngagePairQueueCategory.Finish={EngagePairQueueCategory?.Finish}, CategoryDetails.Finish={EngagePairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{EngagePairFinishText}\", QueuePairFinishText=\"{QueuePairFinishText}\"";
-                _ = _mqttService.PublishMqtt("pulsarui/debug", msg2);
-                LocalLog(msg2);
-            }
-            catch { }
+            var msg2 = $"EngagePair DEBUG: EngagePairQueueCategory.Finish={EngagePairQueueCategory?.Finish}, CategoryDetails.Finish={EngagePairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{EngagePairFinishText}\", QueuePairFinishText=\"{QueuePairFinishText}\"";
+            MaybeDebug(msg2);
 
             // Set EngagePairModeText similarly to QueuePairModeText so UI shows the engaged mode/round
             string engageModeName = (ModeList != null && EngagePairQueueCategory != null && EngagePairQueueCategory.Mode >= 0 && EngagePairQueueCategory.Mode < ModeList.Count)
@@ -918,7 +914,16 @@ namespace PulsarUI.ViewModels
                 }
             }
 
-            EngagePairCategText = category.Name;
+            EngagePairCategText = category.Name; 
+            EngagePairStartModeText = category.StartMode switch
+            {
+                0 => "Remote (Console) Start",
+                1 => "Remote/Console",
+                2 => "Console",
+                3 =>
+                    $"Auto ({category.AutoStartTimeout}, {Convert.ToDecimal(category.AutoStartStageToStart) / 1000:N1})",
+                _ => "Unknown Start Mode"
+            };
             SystemEngaged = true;
             UpdateButtonStatuses();
             // Publish run configuration (use EngagedRacers collection; new overload handles left/right)
@@ -1089,13 +1094,8 @@ namespace PulsarUI.ViewModels
              }
 
              // Publish/log a small startup message for diagnostics
-             try
-             {
-                 var msg = $"Loaded {Categories.Count} categories; startupCategoryId={EnterPairQueueCategory?.Category}; selectedFinishId={SelectedFinishLine?.Id}";
-                 _ = _mqttService.PublishMqtt("pulsarui/debug", msg);
-                 LocalLog(msg);
-             }
-             catch { }
+             var loadedMsg = $"Loaded {Categories.Count} categories; startupCategoryId={EnterPairQueueCategory?.Category}; selectedFinishId={SelectedFinishLine?.Id}";
+             MaybeDebug(loadedMsg);
 
              InitializeStartupCategoryAndFinish();
          }
@@ -1159,7 +1159,8 @@ namespace PulsarUI.ViewModels
                         if (before != after)
                         {
                             EnterPairQueueCategory.Finish = after;
-                            await _mqttService.PublishMqtt("pulsarui/debug", $"MIGRATE: EnterPairQueueCategory.Finish {before} -> {after}");
+                            if (_enableDebugPublish)
+                                await _mqttService.PublishMqtt("pulsarui/debug", $"MIGRATE: EnterPairQueueCategory.Finish {before} -> {after}");
                         }
                     }
                     if (QueuePairQueueCategory != null)
@@ -1169,7 +1170,8 @@ namespace PulsarUI.ViewModels
                         if (before != after)
                         {
                             QueuePairQueueCategory.Finish = after;
-                            await _mqttService.PublishMqtt("pulsarui/debug", $"MIGRATE: QueuePairQueueCategory.Finish {before} -> {after}");
+                            if (_enableDebugPublish)
+                                await _mqttService.PublishMqtt("pulsarui/debug", $"MIGRATE: QueuePairQueueCategory.Finish {before} -> {after}");
                         }
                     }
                     if (EngagePairQueueCategory != null)
@@ -1179,7 +1181,8 @@ namespace PulsarUI.ViewModels
                         if (before != after)
                         {
                             EngagePairQueueCategory.Finish = after;
-                            await _mqttService.PublishMqtt("pulsarui/debug", $"MIGRATE: EngagePairQueueCategory.Finish {before} -> {after}");
+                            if (_enableDebugPublish)
+                                await _mqttService.PublishMqtt("pulsarui/debug", $"MIGRATE: EngagePairQueueCategory.Finish {before} -> {after}");
                         }
                     }
                 }
@@ -1202,8 +1205,7 @@ namespace PulsarUI.ViewModels
                         {
                             var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.Description}"));
                             var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
-                            _ = _mqttService.PublishMqtt("pulsarui/debug", initialMapping);
-                            LocalLog(initialMapping);
+                            MaybeDebug(initialMapping);
                         }
                         catch { }
 
@@ -1225,8 +1227,7 @@ namespace PulsarUI.ViewModels
                         {
                             var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.Description}"));
                             var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
-                            _ = _mqttService.PublishMqtt("pulsarui/debug", initialMapping);
-                            LocalLog(initialMapping);
+                            MaybeDebug(initialMapping);
                         }
                         catch { }
 
@@ -1239,8 +1240,7 @@ namespace PulsarUI.ViewModels
                 {
                     var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.Description}"));
                     var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
-                    _ = _mqttService.PublishMqtt("pulsarui/debug", initialMapping);
-                    LocalLog(initialMapping);
+                    MaybeDebug(initialMapping);
                 }
                 catch { }
 
@@ -1296,8 +1296,7 @@ namespace PulsarUI.ViewModels
                      EngagePairQueueCategoryHandler(EngagePairQueueCategory, new PropertyChangedEventArgs(""));
 
                      var msg = $"Initialized startupCategoryId={EnterPairQueueCategory.Category}; selectedFinishId={SelectedFinishLine?.Id}";
-                     try { _ = _mqttService.PublishMqtt("pulsarui/debug", msg); } catch { }
-                     LocalLog(msg);
+                     MaybeDebug(msg);
                  }
              }
              catch (Exception ex)
@@ -1305,6 +1304,19 @@ namespace PulsarUI.ViewModels
                  LocalLog($"InitializeStartupCategoryAndFinish error: {ex.Message}");
              }
          }
+
+        // Centralized helper - only publishes/logs when debug flags are enabled
+        private void MaybeDebug(string msg)
+        {
+            if (_enableLocalLog)
+            {
+                try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n"); } catch { }
+            }
+            if (_enableDebugPublish && _mqttService != null)
+            {
+                try { _ = _mqttService.PublishMqtt("pulsarui/debug", msg); } catch { if (_enableLocalLog) { try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " PublishMqtt failed\n"); } catch { } } }
+            }
+        }
 
         // F5 (Queue) is enabled if any EnterRacers have a RaceNumber and all QueuedRacers are empty
         public bool IsF5Enabled =>
@@ -1322,6 +1334,8 @@ namespace PulsarUI.ViewModels
         public bool IsF11Enabled =>
             QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
 
+        
+
 
         // Centralized helper to update all button-related bindings
         private void UpdateButtonStatuses()
@@ -1333,6 +1347,7 @@ namespace PulsarUI.ViewModels
 
         private void LocalLog(string msg)
         {
+            if (!_enableLocalLog) return;
             try
             {
                 File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n");
