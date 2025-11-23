@@ -187,7 +187,7 @@
             </StackPanel>
         </TabItem>
         <TabItem Header="Racers">
-            <DataGrid>
+            <DataGrid x:Name="RacersDataGrid">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="ID"/>
                     <DataGridTextColumn Header="Category"/>
@@ -195,8 +195,9 @@
                     <DataGridTextColumn Header="Class"/>
                     <DataGridTextColumn Header="Name"/>
                     <DataGridTextColumn Header="Vehicle"/>
-                    <DataGridTextColumn Header="Indiv. Index"/>
-                    <DataGridTextColumn Header="Pref. Tree"/>
+                    <DataGridTextColumn Header="Personal Index"/>
+                    <DataGridTextColumn Header="Event Index"/>
+                    <DataGridTextColumn Header="Preferred Tree"/>
                 </DataGrid.Columns>
             </DataGrid>
         </TabItem><TabItem Header="Miscellaneous">

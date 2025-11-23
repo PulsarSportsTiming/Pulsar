@@ -26,6 +26,13 @@ namespace PulsarUI.ViewModels
         private readonly DatabaseService _databaseService = default!;
 
         private readonly MqttService _mqttService = default!;
+        // Test message content received via MQTT (for UI popup)
+        [ObservableProperty]
+        private string? _testMessageTopic;
+        [ObservableProperty]
+        private string? _testMessagePayload;
+        [ObservableProperty]
+        private bool _showTestMessagePopup;
 
         // Enable/disable debug publishing and local logging (toggle while diagnosing)
         private readonly bool _enableDebugPublish = false;
@@ -223,31 +230,60 @@ namespace PulsarUI.ViewModels
 
             _databaseService = new DatabaseService(dbConnectionString);
             // Launch async loads and log that we started them
+            // Suppress category publishes while we set up initial queue items so we don't emit unintended MQTT messages
+            _suppressCategPublish = true;
             _ = LoadFinishLinesAsync();
             _ = LoadTreeTypesAsync();
             _ = LoadCategoriesAsync();
             LocalLog("Launched LoadFinishLines/LoadTreeTypes/LoadCategories tasks");
 
              _mqttService = new MqttService();
+            // Wire up test message handler: surface to ViewModel properties so View can react
+            try
+            {
+                _mqttService.TestMessageReceived += (topic, payload) =>
+                {
+                    // Marshal onto Avalonia UI thread
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        TestMessageTopic = topic;
+                        TestMessagePayload = payload;
+                        ShowTestMessagePopup = true;
+                    });
+                };
+            }
+            catch { }
 
             EnterPairQueueCategory = new CategQueueItem
-            {
-                QueueIndex = 0,
-                Category = 1,
-                Finish = 0,
-                Mode = 0,
-                Round = 1,
-                LastRound = 0
-            };
+             {
+                 QueueIndex = 0,
+                 Category = 1,
+                 Finish = 0,
+                 Mode = 0,
+                 Round = 1,
+                 LastRound = 0
+             };
 
-            EnterPairQueueCategory.PropertyChanged += EnterPairQueueCategoryHandler;
-            // Attach handlers for the other two CategQueueItems
+             EnterPairQueueCategory.PropertyChanged += EnterPairQueueCategoryHandler;
+             // Attach handlers for the other two CategQueueItems
+            // Ensure Queue/Engage categories remain empty (Category==0) at startup until user queues/engages
             if (QueuePairQueueCategory != null)
+            {
+                QueuePairQueueCategory.Category = 0;
+                // Do not assign null to CategoryDetails (non-nullable). Leave it as-is or replace with a default clone if required.
                 QueuePairQueueCategory.PropertyChanged += QueuePairQueueCategoryHandler;
+            }
             if (EngagePairQueueCategory != null)
+            {
+                EngagePairQueueCategory.Category = 0;
+                // Do not assign null to CategoryDetails (non-nullable). Leave it as-is or replace with a default clone if required.
                 EngagePairQueueCategory.PropertyChanged += EngagePairQueueCategoryHandler;
+            }
 
             EnterPairSelectedCategComboText = CategComboBoxItems?.FirstOrDefault();
+
+            // We've finished initial setup; re-enable category publishes
+            _suppressCategPublish = false;
 
             foreach (var racer in EnterRacers)
                 racer.PropertyChanged += EnterPairRacerEntryHandler;
@@ -935,6 +971,7 @@ namespace PulsarUI.ViewModels
         private void ResetEngagePair()
         {
             SystemEngaged = false;
+            _mqttService.ResetSystemAsync();
             UpdateButtonStatuses();
             foreach (var racer in EngagedRacers)
                 racer.ClearAll();
@@ -1053,9 +1090,18 @@ namespace PulsarUI.ViewModels
                 .Select(c => $"{c.Order.ToString("D2")} - {c.Name}")
                 .ToList();
 
-            // Ensure the selected combo text is initialized now that the category items exist
-            // Prefer selecting startup category by the 2-digit Order parsed from EnterPairSelectedCategComboText
-            Category? startupCategory = null;
+            // Prefer selecting category with Order == 1 (displayed as "01 - Name") on startup if present
+            try
+            {
+                var firstOrder1 = CategComboBoxItems.FirstOrDefault(i => i != null && i.StartsWith("01 -"));
+                if (!string.IsNullOrWhiteSpace(firstOrder1))
+                    EnterPairSelectedCategComboText = firstOrder1;
+            }
+            catch { }
+
+             // Ensure the selected combo text is initialized now that the category items exist
+             // Prefer selecting startup category by the 2-digit Order parsed from EnterPairSelectedCategComboText
+             Category? startupCategory = null;
             try
             {
                 if (!string.IsNullOrWhiteSpace(EnterPairSelectedCategComboText) && EnterPairSelectedCategComboText.Trim().Length >= 2)
@@ -1067,7 +1113,7 @@ namespace PulsarUI.ViewModels
                     }
                 }
             }
-            catch { }
+            catch (Exception) { /* ignore parse lookup failures */ }
 
             // Fallback: prefer matching Category.Id if no Order match, else first category
             if (startupCategory == null)
@@ -1186,7 +1232,7 @@ namespace PulsarUI.ViewModels
                         }
                     }
                 }
-                catch { /* best-effort migration; swallow errors to avoid blocking startup */ }
+                catch (Exception) { /* best-effort migration; swallow errors to avoid blocking startup */ }
 
                 // If a category is already selected and has a Finish id, prefer that
                 if (EnterPairQueueCategory?.CategoryDetails != null)
@@ -1207,7 +1253,7 @@ namespace PulsarUI.ViewModels
                             var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
                             MaybeDebug(initialMapping);
                         }
-                        catch { }
+                        catch (Exception) { /* ignore logging errors */ }
 
                         return;
                     }
@@ -1229,7 +1275,7 @@ namespace PulsarUI.ViewModels
                             var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
                             MaybeDebug(initialMapping);
                         }
-                        catch { }
+                        catch (Exception) { /* ignore logging errors */ }
 
                         return;
                     }
@@ -1242,7 +1288,7 @@ namespace PulsarUI.ViewModels
                     var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
                     MaybeDebug(initialMapping);
                 }
-                catch { }
+                catch (Exception) { /* ignore logging errors */ }
 
                 QueuePairQueueCategoryHandler(QueuePairQueueCategory, new PropertyChangedEventArgs(""));
                 EngagePairQueueCategoryHandler(EngagePairQueueCategory, new PropertyChangedEventArgs(""));
@@ -1270,7 +1316,7 @@ namespace PulsarUI.ViewModels
                             startupCategory = Categories.FirstOrDefault(c => c != null && c.Order == parsedOrder);
                     }
                 }
-                catch { }
+                catch (Exception) { /* ignore parse lookup failures */ }
 
                 if (startupCategory == null)
                     startupCategory = Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory.Category) ?? Categories.FirstOrDefault();
@@ -1310,11 +1356,11 @@ namespace PulsarUI.ViewModels
         {
             if (_enableLocalLog)
             {
-                try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n"); } catch { }
+                try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n"); } catch (Exception) { /* ignore logging failures */ }
             }
             if (_enableDebugPublish && _mqttService != null)
             {
-                try { _ = _mqttService.PublishMqtt("pulsarui/debug", msg); } catch { if (_enableLocalLog) { try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " PublishMqtt failed\n"); } catch { } } }
+                try { _ = _mqttService.PublishMqtt("pulsarui/debug", msg); } catch (Exception) { if (_enableLocalLog) { try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " PublishMqtt failed\n"); } catch { } } }
             }
         }
 
@@ -1352,7 +1398,7 @@ namespace PulsarUI.ViewModels
             {
                 File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n");
             }
-            catch { }
+            catch (Exception) { /* ignore */ }
         }
     }
 }

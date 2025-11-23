@@ -64,10 +64,29 @@
     <!--<Viewbox Stretch="Uniform" StretchDirection="Both">-->
     <Grid ColumnDefinitions="2*,*,2*" RowDefinitions="2*,30*,2*,3*,3*,5*,4*" Margin="1">
         <!-- Title Bar -->
-        <controls:TitleBar Grid.Column="0" Grid.Row="0" Grid.ColumnSpan="3" Classes="Top"
-                           TBLeft="{Binding CurrentTime, Mode=OneWay}"
-                           TBCategory="{Binding EngagePairCategText}"
-                           TBRound="{Binding EngagePairModeText}" />
+        <Grid Grid.Column="0" Grid.Row="0" Grid.ColumnSpan="3" ColumnDefinitions="*, *, *" Background="{DynamicResource TitleBackground}" Margin="1,0,1,0">
+            <Label Classes="StandardLabel" Grid.Column="0" Content="{Binding CurrentTime, Mode=OneWay}" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                        HorizontalAlignment="Center">
+                <!-- Small round info button (transparent Button; circular white background defined by inner Border) -->
+                <Button x:Name="InfoEngageButton" Padding="0" Background="Transparent" BorderBrush="Transparent" Click="InfoEngageButton_Click">
+                    <Border Width="22" Height="22" CornerRadius="11" Background="#E9E9EA" BorderBrush="#0078D4" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <PathIcon Data="{StaticResource info_regular}" Foreground="#0078D4" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0" Width="16" Height="16" />
+                    </Border>
+                </Button>
+                <Label Classes="StandardLabelBold" Content="{Binding EngagePairCategText}" />
+                <Label Classes="StandardLabelBold" Content="—" />
+                <Label Classes="StandardLabelBold" Content="{Binding EngagePairModeText}" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" HorizontalAlignment="Right" Orientation="Horizontal">
+                <PathIcon Foreground="DimGray" Margin="3,1,3,1" Data="{StaticResource HeartPulseRegular}" />
+                <PathIcon Foreground="DimGray" Margin="3,1,3,1" Data="{StaticResource HeartPulseRegular}" />
+                <PathIcon Foreground="DimGray" Margin="3,1,3,1" Data="{StaticResource HeartPulseRegular}" />
+                <PathIcon Foreground="DimGray" Margin="3,1,3,1" Data="{StaticResource HeartPulseRegular}" />
+                <PathIcon Foreground="DimGray" Margin="3,1,3,1" Data="{StaticResource HeartPulseRegular}" />
+                <PathIcon Foreground="DimGray" Margin="3,1,3,1" Data="{StaticResource GlobeClockRegular}" />
+            </StackPanel>
+        </Grid>
 
         <!-- Left lane timing data -->
         <Grid Grid.Row="1" Grid.Column="0" Margin="1,1,1,1" Background="{DynamicResource DetailBackground}"
@@ -207,9 +226,21 @@
         </Grid>
 
         <!-- Queue Title -->
-        <controls:TitleBar Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" TBLeft="Queued Pair"
-                           TBCategory="{Binding QueuePairCategText}"
-                           TBRound="{Binding QueuePairModeText}" />
+        <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" ColumnDefinitions="*, *, *" Background="{DynamicResource TitleBackground}" Margin="1,10,1,0">
+            <Label Classes="StandardLabel" Grid.Column="0" Content="Queued Pair" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                        HorizontalAlignment="Center">
+                <!-- Small round info button (transparent Button; circular white background defined by inner Border) -->
+                <Button x:Name="InfoQueueButton" Padding="0" Background="Transparent" BorderBrush="Transparent" Click="InfoQueueButton_Click">
+                    <Border Width="22" Height="22" CornerRadius="11" Background="#E9E9EA" BorderBrush="#0078D4" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <PathIcon Data="{StaticResource info_regular}" Foreground="#0078D4" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0" Width="16" Height="16" />
+                    </Border>
+                </Button>
+                <Label Classes="StandardLabelBold" Content="{Binding QueuePairCategText}" />
+                <Label Classes="StandardLabelBold" Content="—" />
+                <Label Classes="StandardLabelBold" Content="{Binding QueuePairModeText}" />
+            </StackPanel>
+        </Grid>
 
         <!-- Queue Left -->
         <Grid Grid.Row="3" Grid.Column="0" Background="#303030" Margin="1">
@@ -254,6 +285,12 @@
             <Label Classes="StandardLabel" Grid.Column="0" Content="Enter Pair" />
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                         HorizontalAlignment="Center" IsVisible="{Binding SetupInactive}">
+                <!-- Small round info button (transparent Button; circular white background defined by inner Border) -->
+                <Button x:Name="InfoEnterButton" Padding="0" Background="Transparent" BorderBrush="Transparent" Click="InfoEnterButton_Click">
+                    <Border Width="22" Height="22" CornerRadius="11" Background="#E9E9EA" BorderBrush="#0078D4" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <PathIcon Data="{StaticResource info_regular}" Foreground="#0078D4" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0" Width="16" Height="16" />
+                    </Border>
+                </Button>
                 <Label Classes="StandardLabelBold"
                        Content="{Binding EnterPairCategText, Mode=OneWay}" />
                 <Label Classes="StandardLabelBold" Content="—" />
@@ -496,5 +533,28 @@
                  </Border>
               </Grid>
           </Popup>
-    </Grid>
-</Window>
+
+        <!-- Popup used to display Category details when info buttons are clicked -->
+        <Popup x:Name="InfoPopup" IsLightDismissEnabled="True" Placement="Bottom" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3">
+            <!-- Child will be set dynamically from code-behind -->
+        </Popup>
+
+        <!-- Add Test Message Popup -->
+        <Popup x:Name="TestMessagePopup" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" IsLightDismissEnabled="True" Placement="Center" IsOpen="{Binding ShowTestMessagePopup}">
+            <Border Background="#222" BorderBrush="#888" BorderThickness="1" CornerRadius="6" Padding="12" Width="560">
+                <StackPanel>
+                    <TextBlock Text="MQTT Test Message" FontWeight="Bold" Foreground="White" FontSize="16" Margin="0,0,0,8" />
+                    <TextBlock Text="Topic:" Foreground="#CCCCCC" FontWeight="Bold" />
+                    <TextBlock Text="{Binding TestMessageTopic}" Foreground="White" TextWrapping="Wrap" Margin="0,0,0,6" />
+                    <TextBlock Text="Payload:" Foreground="#CCCCCC" FontWeight="Bold" />
+                    <ScrollViewer Height="180" VerticalScrollBarVisibility="Auto">
+                        <TextBlock Text="{Binding TestMessagePayload}" Foreground="White" TextWrapping="Wrap" />
+                    </ScrollViewer>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                        <Button Content="Close" Width="90" Click="OnCloseTestMessagePopup" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Popup>
+     </Grid>
+ </Window>
