@@ -15,7 +15,7 @@ namespace PulsarUI.Views
     public partial class MainWindow : Window
     {
         // Provide a design-time view model in the parameterless constructor to satisfy non-nullable usages in XAML
-        private MainWindowViewModel _viewModel;
+        private MainWindowViewModel? _viewModel;
 
         // Simple ICommand implementation for code-behind keybinding
         private sealed class RelayCommand : ICommand
@@ -73,7 +73,10 @@ namespace PulsarUI.Views
                     };
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("MainWindow ctor (popup wiring) error: " + ex.Message);
+            }
 
             // Subscribe to ViewModel changes for test message popup
             try
@@ -93,20 +96,20 @@ namespace PulsarUI.Views
                                     if (show)
                                     {
                                         // Optionally set focus to the popup's close button
-                                        try { /* no-op: focus may be set if needed */ } catch { }
+                                        try { /* no-op: focus may be set if needed */ } catch (Exception ex2) { Console.Error.WriteLine("MainWindow: focus set failed: " + ex2.Message); }
                                     }
                                 }
                             }
                         }
-                        catch { }
+                        catch (Exception ex3) { Console.Error.WriteLine("MainWindow.PropertyChanged handler error: " + ex3.Message); }
                     };
                 }
             }
-            catch { }
+            catch (Exception ex4) { Console.Error.WriteLine("MainWindow ctor (property wiring) error: " + ex4.Message); }
         }
         public MainWindow(MainWindowViewModel viewModel)
         {
-            _viewModel = viewModel;
+            _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
             InitializeComponent();
             DataContext = _viewModel;
 
@@ -145,7 +148,10 @@ namespace PulsarUI.Views
                     };
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("MainWindow ctor (popup wiring) error: " + ex.Message);
+            }
 
             // Subscribe to ViewModel changes for test message popup
             try
@@ -165,11 +171,14 @@ namespace PulsarUI.Views
                                 }
                             }
                         }
-                        catch { }
+                        catch (Exception ex) { Console.Error.WriteLine("MainWindow.PropertyChanged handler error: " + ex.Message); }
                     };
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("MainWindow ctor (property wiring) error: " + ex.Message);
+            }
         }
 
         // typed-digit buffer for category popup
@@ -191,7 +200,7 @@ namespace PulsarUI.Views
                         CategoryTypedDisplay.Text = _categoryTyped;
                 }
             }
-            catch { }
+            catch (Exception ex) { Console.Error.WriteLine("UpdateCategoryTypedDisplay error: " + ex.Message); }
         }
 
         // highlight matching button for current typed buffer (if any)
@@ -212,19 +221,19 @@ namespace PulsarUI.Views
                             // high-contrast orange highlight + thicker border
                             btn.Background = new SolidColorBrush(Color.Parse("#FF8C00")); // orange
                             btn.Foreground = Brushes.Black;
-                            try { btn.BorderBrush = new SolidColorBrush(Color.Parse("#FFA500")); btn.BorderThickness = new Avalonia.Thickness(2); } catch (Exception) { /* brush parse failure unlikely; ignore */ }
+                            try { btn.BorderBrush = new SolidColorBrush(Color.Parse("#FFA500")); btn.BorderThickness = new Avalonia.Thickness(2); } catch (Exception ex) { Console.Error.WriteLine("HighlightMatchingButton (border) error: " + ex.Message); }
                         }
                         else
                         {
                             // reset style for non-selected buttons
                             btn.Background = new SolidColorBrush(Color.Parse("#2D2D30"));
                             btn.Foreground = Brushes.White;
-                            try { btn.BorderBrush = new SolidColorBrush(Color.Parse("#444444")); btn.BorderThickness = new Avalonia.Thickness(1); } catch (Exception) { /* ignore styling errors */ }
+                            try { btn.BorderBrush = new SolidColorBrush(Color.Parse("#444444")); btn.BorderThickness = new Avalonia.Thickness(1); } catch (Exception ex) { Console.Error.WriteLine("HighlightMatchingButton (border reset) error: " + ex.Message); }
                         }
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { Console.Error.WriteLine("HighlightMatchingButton error: " + ex.Message); }
         }
 
         // when two digits are typed (or enter pressed) select matching category if found
@@ -256,7 +265,7 @@ namespace PulsarUI.Views
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { Console.Error.WriteLine("TrySelectCategoryFromTyped error: " + ex.Message); }
         }
 
         private void OnWindowKeyDown(object? sender, KeyEventArgs e)
@@ -405,9 +414,9 @@ namespace PulsarUI.Views
 
                 RoundNumericUpDown.Value = newVal;
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore any runtime issues
+                Console.Error.WriteLine("AdjustRound error: " + ex.Message);
             }
         }
 
@@ -599,9 +608,9 @@ namespace PulsarUI.Views
                 int newIndex = Math.Clamp(current + delta, 0, count - 1);
                 ModeComboBox.SelectedIndex = newIndex;
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore any runtime issues
+                Console.Error.WriteLine("AdjustMode error: " + ex.Message);
             }
         }
 
@@ -630,7 +639,7 @@ namespace PulsarUI.Views
                     {
                         CategoryPopup.PlacementTarget = this;
                     }
-                    catch { }
+                    catch (Exception ex) { Console.Error.WriteLine("ToggleCategoryPopup (placement) error: " + ex.Message); }
                 }
 
                 CategoryPopup.IsOpen = !CategoryPopup.IsOpen;
@@ -648,12 +657,12 @@ namespace PulsarUI.Views
                     {
                         CategoryCaptureBox?.Focus();
                     }
-                    catch (Exception) { /* Focus may fail; ignore */ }
+                    catch (Exception ex) { Console.Error.WriteLine("ToggleCategoryPopup (focus) error: " + ex.Message); }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore
+                Console.Error.WriteLine("ToggleCategoryPopup error: " + ex.Message);
             }
         }
 
@@ -716,7 +725,7 @@ namespace PulsarUI.Views
                                 btn.BorderBrush = new SolidColorBrush(Color.Parse("#444444"));
                                 btn.BorderThickness = new Avalonia.Thickness(1);
                             }
-                            catch (Exception) { /* ignore brush/style set errors */ }
+                            catch (Exception ex) { Console.Error.WriteLine("BuildCategoryGrid (button style) error: " + ex.Message); }
 
                             // Wire click to select category: set the ViewModel's selected combo text and close popup
                             btn.Click += (s, ev) =>
@@ -730,7 +739,7 @@ namespace PulsarUI.Views
                                     // Close the popup if present
                                     try { if (CategoryPopup != null) CategoryPopup.IsOpen = false; } catch (Exception) { /* best-effort close */ }
                                 }
-                                catch { }
+                                catch (Exception ex) { Console.Error.WriteLine("BuildCategoryGrid (button click) error: " + ex.Message); }
                             };
                         }
 
@@ -740,9 +749,9 @@ namespace PulsarUI.Views
                      }
                  }
              }
-             catch
+             catch (Exception ex)
              {
-                 // ignore runtime issues
+                 Console.Error.WriteLine("BuildCategoryGrid error: " + ex.Message);
              }
          }
 
@@ -775,10 +784,7 @@ namespace PulsarUI.Views
                     var tb = new TextBlock { Text = $"{p.Name}: {val}", Foreground = Brushes.White, FontSize = 12, Margin = new Avalonia.Thickness(0, 2, 0, 2) };
                     panel.Children.Add(tb);
                 }
-                catch
-                {
-                    // ignore property read errors
-                }
+                catch (Exception ex) { Console.Error.WriteLine("BuildCategoryInfoContent (property) error: " + ex.Message); }
             }
 
             return panel;
@@ -806,7 +812,7 @@ namespace PulsarUI.Views
                             else
                                 q = _viewModel.EnterPairQueueCategory;
                         }
-                        catch { }
+                        catch (Exception ex) { Console.Error.WriteLine("ShowInfoPopup (queue item determination) error: " + ex.Message); }
 
                         // Prefer explicit CategoryDetails on the chosen queue item
                         if (q != null)
@@ -838,7 +844,7 @@ namespace PulsarUI.Views
                         }
                     }
                 }
-                catch (Exception) { /* best-effort lookup; ignore failures */ }
+                catch (Exception ex) { Console.Error.WriteLine("ShowInfoPopup (category resolution) error: " + ex.Message); }
 
                 // Treat a resolved category with Id==0 as unresolved (placeholder); try to match by display labels
                 if (resolved != null && resolved.Id == 0)
@@ -864,7 +870,7 @@ namespace PulsarUI.Views
                             if (matchByName != null) resolved = matchByName;
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { Console.Error.WriteLine("ShowInfoPopup (match by display label) error: " + ex.Message); }
                 }
 
                 Avalonia.Controls.Control content;
@@ -881,7 +887,7 @@ namespace PulsarUI.Views
                                   : (_viewModel?.EngagePairCategText ?? _viewModel?.EnterPairSelectedCategComboText);
                         msgPanel.Children.Add(new TextBlock { Text = $"Selected: {name}", Foreground = Brushes.White, Margin = new Avalonia.Thickness(0,6,0,0) });
                     }
-                    catch { }
+                    catch (Exception ex) { Console.Error.WriteLine("ShowInfoPopup (message panel) error: " + ex.Message); }
                     content = msgPanel;
                 }
                 else
@@ -903,9 +909,9 @@ namespace PulsarUI.Views
                     InfoPopup.PlacementTarget = anchor;
                 InfoPopup.IsOpen = true;
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore
+                Console.Error.WriteLine("ShowInfoPopup error: " + ex.Message);
             }
         }
 
@@ -937,7 +943,7 @@ namespace PulsarUI.Views
                 else if (TestMessagePopup != null)
                     TestMessagePopup.IsOpen = false;
             }
-            catch { }
+            catch (Exception ex) { Console.Error.WriteLine("OnCloseTestMessagePopup error: " + ex.Message); }
         }
     }
 }

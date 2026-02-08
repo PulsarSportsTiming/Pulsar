@@ -78,6 +78,11 @@ public static class Program
         services.AddSingleton<MainWindowViewModel>(); // Add the ViewModel to DI container
         services.AddSingleton<MainWindow>();
 
+        // Register InputMapService using config/inputmap.json relative to app base directory
+        // Match the project and repo `Config` folder (capitalized) so the file copied to output will be found
+        var inputMapPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Config", "inputmap.json");
+        services.AddSingleton(new InputMapService(inputMapPath));
+
         // Build the ServiceProvider
         var serviceProvider = services.BuildServiceProvider();
 

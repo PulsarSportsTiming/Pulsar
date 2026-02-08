@@ -5,8 +5,4 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup>
-    <!-- Optional: reference the main project if it needs to use its types -->
-    <ProjectReference Include="..\\..\\PulsarUI.csproj" Condition="Exists('..\\..\\PulsarUI.csproj')" />
-  </ItemGroup>
 </Project>

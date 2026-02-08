@@ -12,7 +12,12 @@ using CommunityToolkit.Mvvm.Input;
 using System.Threading.Tasks;
 using System.Collections.ObjectModel;
 using Microsoft.Extensions.Configuration;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.IO;
+using System.Reflection;
+using MQTTnet;
+using PulsarUI.Helpers; // added for ModeItem/RunModeExtensions
 
 namespace PulsarUI.ViewModels
 {
@@ -33,12 +38,20 @@ namespace PulsarUI.ViewModels
         private string? _testMessagePayload;
         [ObservableProperty]
         private bool _showTestMessagePopup;
+        
+        [ObservableProperty]
+        private ObservableCollection<string> _leftTimingLabels = new();
+
+        [ObservableProperty]
+        private ObservableCollection<string> _rightTimingLabels = new();
 
         // Enable/disable debug publishing and local logging (toggle while diagnosing)
         private readonly bool _enableDebugPublish = false;
         private readonly bool _enableLocalLog = false;
 
         private string? _lastConfirmedRaceNum;
+        
+        public IEnumerable<RunMode> RunModes { get; } = Enum.GetValues(typeof(RunMode)).Cast<RunMode>();
 
         // Provide async commands so we avoid "async void" lambdas and analyzer warnings; initialized in constructor
         // Initialize with no-op AsyncRelayCommand so they're safe in design-time constructor paths
@@ -56,6 +69,102 @@ namespace PulsarUI.ViewModels
         partial void OnSystemEngagedChanged(bool value)
         {
             UpdateButtonStatuses();
+
+            // When the system becomes engaged, create an Engaged Pair with two Runs (left/right).
+            if (value)
+            {
+                // Avoid recreating if already present
+                if (EngagedPairModel != null)
+                    return;
+
+                var p = new Pair();
+                p.Id = Guid.NewGuid();
+
+                // Resolve category for the engaged pair. Prefer CategoryDetails if it appears populated.
+                Category? resolvedCat = null;
+                if (EngagePairQueueCategory?.CategoryDetails != null && EngagePairQueueCategory.CategoryDetails.Id != 0)
+                    resolvedCat = EngagePairQueueCategory.CategoryDetails;
+                else if (Categories != null && EngagePairQueueCategory != null)
+                    resolvedCat = Categories.FirstOrDefault(c => c != null && c.Id == EngagePairQueueCategory.Category);
+
+                p.Category = resolvedCat;
+                p.RunMode = EngagePairQueueCategory?.Mode;
+
+                // Create left and right runs; clone the engaged RaceEntry to decouple UI instances.
+                var leftEntry = EngagedRacers.ElementAtOrDefault(0)?.Clone(2) ?? new RaceEntry { QueueIndex = 2, Lane = 0 };
+                var rightEntry = EngagedRacers.ElementAtOrDefault(1)?.Clone(2) ?? new RaceEntry { QueueIndex = 2, Lane = 1 };
+
+                var leftRun = new Run { Entry = leftEntry };
+                var rightRun = new Run { Entry = rightEntry };
+
+                p.Runs = new Run[] { leftRun, rightRun };
+
+                // Populate expected reaction times for the created runs
+                PulsarUI.Services.TimingHelpers.PopulateExpectedReactionTimes(p);
+
+                EngagedPairModel = p;
+
+                MaybeDebug($"Created EngagedPair {p.Id} CategoryId={p.Category?.Id} Mode={p.RunMode}");
+
+                // Serialize the Pair consistently for publishing
+                try
+                {
+                    var options = new System.Text.Json.JsonSerializerOptions
+                    {
+                        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+                    };
+                    options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase));
+                    // Register DateTime converters to format UTC DateTimes as "yyyy-MM-dd HH:mm:ssZ"
+                    options.Converters.Add(new PulsarUI.Services.JsonConverters.DateTimeUtcConverter());
+                    options.Converters.Add(new PulsarUI.Services.JsonConverters.NullableDateTimeUtcConverter());
+                    // Build a minimal, well-structured payload to avoid serialization issues for consumers
+                    var minimal = new
+                    {
+                        id = p.Id,
+                        categoryId = p.Category?.Id,
+                        runMode = p.RunMode?.ToString(),
+                        runs = p.Runs?.Select(r => new
+                        {
+                            lane = r.Entry?.Lane,
+                            queueIndex = r.Entry?.QueueIndex,
+                            raceNumber = r.Entry?.RaceNumber,
+                            treeId = r.Entry?.Tree?.Id
+                        }).ToArray()
+                    };
+                    var payload = System.Text.Json.JsonSerializer.Serialize(minimal, options);
+
+                    // Publish to a runqueue topic so consumers that already subscribe to runqueue/* see the Pair with GUID
+                    if (_mqttService != null)
+                    {
+                        _ = _mqttService.PublishMqtt("runqueue/engagedpair/pair", payload);
+                    }
+
+                    // Additionally publish the full Pair to a debug topic so external subscribers can inspect it
+                    try
+                    {
+                        if (_mqttService != null)
+                        {
+                            var full = System.Text.Json.JsonSerializer.Serialize(p, options);
+                            // Publish full Pair for debugging/consumers that need the complete object
+                            _ = _mqttService.PublishMqtt("pulsarui/engagedpair/full", full);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MaybeDebug("EngagedPair debug publish failed: " + ex.Message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MaybeDebug("EngagedPair publish failed: " + ex.Message);
+                }
+            }
+            else
+            {
+                // Clear when the system is disengaged
+                EngagedPairModel = null;
+                MaybeDebug("Cleared EngagedPairModel due to disengage");
+            }
         }
 
         [ObservableProperty]
@@ -64,6 +173,8 @@ namespace PulsarUI.ViewModels
         {
             UpdateButtonStatuses();
         }
+        
+        [ObservableProperty] private long _runStartTimestampNanoseconds;
 
         // Category Properties
         [ObservableProperty] private Category? _enterPairCateg;
@@ -137,7 +248,7 @@ namespace PulsarUI.ViewModels
         [ObservableProperty] private string? _engagePairCategText;
 
         // Race Mode Properties
-        [ObservableProperty] private List<string> _modeList = new();
+        // ModeItem maps RunMode enum values to user-facing names. Use SelectedValue/SelectedValuePath in XAML to bind the enum directly.
         [ObservableProperty] private string? _queuePairModeText;
         [ObservableProperty] private string? _engagePairModeText;
         [ObservableProperty] private string? _engagePairStartModeText;
@@ -185,20 +296,14 @@ namespace PulsarUI.ViewModels
         public ObservableCollection<RaceEntry> EnterRacers { get; } = new ObservableCollection<RaceEntry> { new RaceEntry { Lane = 0, QueueIndex = 0 }, new RaceEntry { Lane = 1, QueueIndex = 0 } };
         public ObservableCollection<RaceEntry> QueuedRacers { get; } = new ObservableCollection<RaceEntry> { new RaceEntry { Lane = 0, QueueIndex = 1 }, new RaceEntry { Lane = 1, QueueIndex = 1 } };
         public ObservableCollection<RaceEntry> EngagedRacers { get; } = new ObservableCollection<RaceEntry> { new RaceEntry { Lane = 0, QueueIndex = 2 }, new RaceEntry { Lane = 1, QueueIndex = 2 } };
+        // Holds the generated Pair when the system becomes engaged
+        public Pair? EngagedPairModel { get; private set; }
 
         public MainWindowViewModel()
         {
             // Short-circuit heavy initialization in design mode so the XAML designer can instantiate this VM safely.
             if (Avalonia.Controls.Design.IsDesignMode)
             {
-                // Provide minimal defaults used by the design-time preview
-                ModeList = new List<string>
-                {
-                    "Practice",
-                    "Qualifying",
-                    "Eliminations",
-                    "Q+E Combo"
-                };
                 // Ensure there are empty placeholders so bindings in XAML don't NRE
                 EnterPairQueueCategory = new CategQueueItem { QueueIndex = 0, Category = 0, Finish = 0, Mode = 0, Round = 1, LastRound = 0 };
 
@@ -209,13 +314,13 @@ namespace PulsarUI.ViewModels
             }
             // Log constructor entry for diagnostics
             LocalLog("MainWindowViewModel ctor start");
-             // Date/Time Display
-             var now = DateTime.Now;
-             var msToNextSecond = 1000 - now.Millisecond;
+            // Date/Time Display
+            var now = DateTime.Now;
+            var msToNextSecond = 1000 - now.Millisecond;
 
-             Task.Delay(msToNextSecond).ContinueWith(_ => { StartClock(); });
+            Task.Delay(msToNextSecond).ContinueWith(_ => { StartClock(); });
 
-             // Build configuration from appsettings.json and appsettings.local.json (local overrides)
+            // Build configuration from appsettings.json and appsettings.local.json (local overrides)
             var configuration = new ConfigurationBuilder()
                 .SetBasePath(AppContext.BaseDirectory)
                 .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
@@ -237,7 +342,120 @@ namespace PulsarUI.ViewModels
             _ = LoadCategoriesAsync();
             LocalLog("Launched LoadFinishLines/LoadTreeTypes/LoadCategories tasks");
 
-             _mqttService = new MqttService();
+            _mqttService = new MqttService();
+            
+            // Ensure RunManager is attached so MqttService can register runs and compute reaction times
+            try
+            {
+                var runManager = new RunManager();
+                _mqttService.AttachRunManager(runManager);
+                LocalLog("Attached RunManager to MqttService");
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to attach RunManager to MqttService: " + ex.Message);
+            }
+            // Attempt to attach an MQTT client using configuration (if MQTTnet is available at runtime)
+            try
+            {
+                var mqttHost = configuration["MQTT:Host"] ?? "127.0.0.1";
+                var mqttPort = int.TryParse(configuration["MQTT:Port"], out var p) ? p : 1883;
+
+                // Centralized attach helper: service will try direct API first and fallback to reflection as needed
+                try
+                {
+                    _mqttService.AttachMqttClientFromHost(mqttHost, mqttPort, "PulsarUI");
+                    LocalLog("Called AttachMqttClientFromHost on MqttService");
+                }
+                catch (Exception exAttach)
+                {
+                    LocalLog("AttachMqttClientFromHost failed: " + exAttach.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                try { File.AppendAllText("/tmp/pulsar_mqtt.log", DateTime.Now.ToString("o") + "Failed to attach MQTT client: " + ex.Message + "\n"); } catch { }
+            }
+            // Attempt to attach the InputMapService from the app config path so MQTT lookups can resolve down-track inputs
+            try
+            {
+                // Use the same 'Config' folder casing as the project so the file copied to build output is found on case-sensitive filesystems
+                var inputMapPath = Path.Combine(AppContext.BaseDirectory, "Config", "inputmap.json");
+                try { File.AppendAllText("/tmp/pulsarui_config.log", DateTime.Now.ToString("o") + " MainWindowViewModel: trying inputMapPath='" + inputMapPath + "' exists=" + File.Exists(inputMapPath) + "\n"); } catch { }
+                var ims = new InputMapService(inputMapPath);
+                _mqttService.AttachInputMapService(ims);
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to attach InputMapService to MqttService: " + ex.Message);
+            }
+            
+            try
+            {
+                var baseDir = AppContext.BaseDirectory;
+                var candidatePaths = new[]
+                {
+                    Path.Combine(baseDir, "Config", "inputmap.json"),
+                    Path.Combine(baseDir, "..", "..", "..", "Config", "inputmap.json"),
+                    Path.Combine(baseDir, "..", "..", "Config", "inputmap.json"),
+                    Path.Combine(Directory.GetCurrentDirectory(), "Config", "inputmap.json")
+                };
+
+                var configPath = candidatePaths.FirstOrDefault(File.Exists)
+                                 ?? Path.Combine(baseDir, "Config", "inputmap.json");
+
+                if (File.Exists(configPath))
+                {
+                    var json = File.ReadAllText(configPath);
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+
+                    var options = new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true,
+                        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+                    };
+
+                    var inputs = new List<DownTrackInput>();
+                    if (root.TryGetProperty("DownTrackInputs", out var dtiProp))
+                        inputs = JsonSerializer.Deserialize<List<DownTrackInput>>(dtiProp.GetRawText(), options) ?? new List<DownTrackInput>();
+
+                    var traps = new List<SpeedTrap>();
+                    if (root.TryGetProperty("SpeedTraps", out var stProp))
+                        traps = JsonSerializer.Deserialize<List<SpeedTrap>>(stProp.GetRawText(), options) ?? new List<SpeedTrap>();
+
+                    var distanceUnit = configuration["Units:Distance"] ?? "m";
+                    var speedUnit = configuration["Units:Speed"] ?? "km/h";
+
+                    var labelsPerLane = TimingLabelHelpers.GenerateTimingLabels(inputs, traps, distanceUnit, speedUnit);
+
+                    if (labelsPerLane.TryGetValue(InputLane.Left, out var leftLabels))
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            LeftTimingLabels.Clear();
+                            foreach (var l in leftLabels) LeftTimingLabels.Add(l);
+                        });
+                    }
+
+                    if (labelsPerLane.TryGetValue(InputLane.Right, out var rightLabels))
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            RightTimingLabels.Clear();
+                            foreach (var l in rightLabels) RightTimingLabels.Add(l);
+                        });
+                    }
+                }
+                else
+                {
+                    LocalLog("inputmap.json not found in candidate paths; timing labels left empty.");
+                }
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to load/generate timing labels from inputmap.json: " + ex.Message);
+            }
             // Wire up test message handler: surface to ViewModel properties so View can react
             try
             {
@@ -252,20 +470,50 @@ namespace PulsarUI.ViewModels
                     });
                 };
             }
-            catch { }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to wire TestMessageReceived handler: " + ex.Message);
+            }
+             
+            // Wire RunStartReceived so ViewModel can start a run when the RunStartTrigger role timestamp arrives
+            try
+            {
+                _mqttService.RunStartReceived += (tsNs) =>
+                {
+                    // Marshal onto Avalonia UI thread
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        // Only start the run if system is engaged
+                        if (!SystemEngaged)
+                        {
+                            MaybeDebug($"RunStartReceived ignored because SystemEngaged==false; tsNs={tsNs}");
+                            return;
+                        }
+             
+                        RunActive = true;
+                        RunStartTimestampNanoseconds = tsNs;
+                        MaybeDebug($"Run started: RunStartTimestampNanoseconds={tsNs}");
+                    });
+                };
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to wire RunStartReceived handler: " + ex.Message);
+            }
+             
 
             EnterPairQueueCategory = new CategQueueItem
-             {
-                 QueueIndex = 0,
-                 Category = 1,
-                 Finish = 0,
-                 Mode = 0,
-                 Round = 1,
-                 LastRound = 0
-             };
+            {
+                QueueIndex = 0,
+                Category = 1,
+                Finish = 0,
+                Mode = RunMode.Practice,
+                Round = 1,
+                LastRound = 0
+            };
 
-             EnterPairQueueCategory.PropertyChanged += EnterPairQueueCategoryHandler;
-             // Attach handlers for the other two CategQueueItems
+            EnterPairQueueCategory.PropertyChanged += EnterPairQueueCategoryHandler;
+            // Attach handlers for the other two CategQueueItems
             // Ensure Queue/Engage categories remain empty (Category==0) at startup until user queues/engages
             if (QueuePairQueueCategory != null)
             {
@@ -299,15 +547,6 @@ namespace PulsarUI.ViewModels
                     QueuedRacers[i].PropertyChanged += QueuePairRacer_PropertyChanged;
             }
             UpdateQueuePairTreeTexts();
-
-            // Initialize runtime ModeList (correct C# List initializer)
-            ModeList = new List<string>
-            {
-                "Practice",
-                "Qualifying",
-                "Eliminations",
-                "Q+E Combo"
-            };
 
             // Initialize async commands with actual handlers
             LeftRaceNumConfirmedCommand = new AsyncRelayCommand(async () =>
@@ -533,16 +772,16 @@ namespace PulsarUI.ViewModels
                 MaybeDebug(dbgMsg);
             }
 
-            string modeName = (ModeList != null && QueuePairQueueCategory != null && QueuePairQueueCategory.Mode >= 0 && QueuePairQueueCategory.Mode < ModeList.Count)
-                ? ModeList[QueuePairQueueCategory.Mode]
-                : (ModeList?.FirstOrDefault() ?? string.Empty);
+            string modeName = QueuePairQueueCategory != null ? QueuePairQueueCategory.Mode.GetDisplayName() : string.Empty;
             QueuePairModeText = $"{modeName} Round {QueuePairQueueCategory?.Round ?? 0}";
 
             if (IsCategQueueItemDifferent(QueuePairQueueCategory, _lastSentQueuePairQueueCategory))
             {
                 if (QueuePairQueueCategory != null)
+                {
                     _ = _mqttService.PubQueueCategAsync(QueuePairQueueCategory);
-                _lastSentQueuePairQueueCategory = QueuePairQueueCategory.Clone(QueuePairQueueCategory.QueueIndex);
+                    _lastSentQueuePairQueueCategory = QueuePairQueueCategory.Clone(QueuePairQueueCategory.QueueIndex);
+                }
             }
         }
 
@@ -568,16 +807,16 @@ namespace PulsarUI.ViewModels
             var dbgMsg2 = $"EngagePair DEBUG: EngagePairQueueCategory.Finish={EngagePairQueueCategory?.Finish}, CategoryDetails.Finish={EngagePairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{EngagePairFinishText}\", QueuePairFinishText=\"{QueuePairFinishText}\"";
             MaybeDebug(dbgMsg2);
 
-            string modeName = (ModeList != null && EngagePairQueueCategory != null && EngagePairQueueCategory.Mode >= 0 && EngagePairQueueCategory.Mode < ModeList.Count)
-                ? ModeList[EngagePairQueueCategory.Mode]
-                : (ModeList?.FirstOrDefault() ?? string.Empty);
+            string modeName = EngagePairQueueCategory != null ? EngagePairQueueCategory.Mode.GetDisplayName() : string.Empty;
             EngagePairModeText = $"{modeName} Round {EngagePairQueueCategory?.Round ?? 0}";
 
             if (IsCategQueueItemDifferent(EngagePairQueueCategory, _lastSentEngagePairQueueCategory))
             {
                 if (EngagePairQueueCategory != null)
+                {
                     _ = _mqttService.PubQueueCategAsync(EngagePairQueueCategory);
-                _lastSentEngagePairQueueCategory = EngagePairQueueCategory.Clone(EngagePairQueueCategory.QueueIndex);
+                    _lastSentEngagePairQueueCategory = EngagePairQueueCategory.Clone(EngagePairQueueCategory.QueueIndex);
+                }
             }
         }
 
@@ -646,7 +885,8 @@ namespace PulsarUI.ViewModels
                     else if (raceEntry.Lane == 1 && EnterRacers.Count > 1) currentTree = EnterRacers[1].Tree;
                 }
 
-                var indexList = await _databaseService.GetIndexListAsync(raceEntry, EnterPairQueueCategory);
+                // raceEntry is non-null due to the sender check at method entry
+                var indexList = await _databaseService.GetIndexListAsync(raceEntry!, EnterPairQueueCategory);
                 var indexes = new[]
                 {
                     indexList.EventIndex,
@@ -656,7 +896,7 @@ namespace PulsarUI.ViewModels
                 };
                 raceEntry.HandicapIndex = indexes.FirstOrDefault(index => index != "") ?? "00.00";
                 raceEntry.ClearDetails();
-                raceEntry = await _databaseService.GetRacerDetailsAsync(raceEntry, EnterPairQueueCategory);
+                raceEntry = await _databaseService.GetRacerDetailsAsync(raceEntry!, EnterPairQueueCategory);
                 // If DB didn't include a Tree, restore the previous tree or the category default
                 if (raceEntry.Tree == null)
                 {
@@ -702,15 +942,12 @@ namespace PulsarUI.ViewModels
             EnterPairQueueCategory.CategoryDetails = category;
             EnterPairCategText = category.Name;
 
-            // Set Mode/LastRound from category (LastMode maps to ModeList indices)
-            if (ModeList != null && ModeList.Count > 0)
-            {
-                var lm = category.LastMode;
-                if (lm >= 0 && lm < ModeList.Count)
-                    EnterPairQueueCategory.Mode = lm;
-                else
-                    EnterPairQueueCategory.Mode = 0;
-            }
+            // Set Mode/LastRound from category (LastMode stores numeric enum value)
+            var lm = category.LastMode;
+            if (Enum.IsDefined(typeof(RunMode), lm))
+                EnterPairQueueCategory.Mode = (RunMode)lm;
+            else
+                EnterPairQueueCategory.Mode = RunMode.Practice;
             // Store LastRound on the queue item (don't overwrite current Round unless you prefer)
             EnterPairQueueCategory.LastRound = category.LastRound;
 
@@ -775,12 +1012,11 @@ namespace PulsarUI.ViewModels
             MaybeDebug(msg);
 
             // Null-safe mode text construction to avoid nullable warnings
-            string modeName = (ModeList != null && EnterPairQueueCategory != null && EnterPairQueueCategory.Mode >= 0 && EnterPairQueueCategory.Mode < ModeList.Count)
-                ? ModeList[EnterPairQueueCategory.Mode]
-                : (ModeList?.FirstOrDefault() ?? string.Empty);
+            string modeName = EnterPairQueueCategory != null ? EnterPairQueueCategory.Mode.GetDisplayName() : string.Empty;
 
             QueuePairModeText = $"{modeName} Round {EnterPairQueueCategory?.Round ?? 0}";
             // Clone the enter-pair queue item for queued pair and ensure the Finish id is explicit
+            if (EnterPairQueueCategory == null) return;
             var queuedClone = EnterPairQueueCategory.Clone(1);
             // The UI's SelectedFinishLine is the authoritative selection for the Enter pair; ensure the queued clone stores that Id
             queuedClone.Finish = SelectedFinishLine?.Id ?? EnterPairQueueCategory.Finish;
@@ -789,7 +1025,7 @@ namespace PulsarUI.ViewModels
             // Assign the prepared clone so the property setter/handler sees the correct Finish id
             if (queuedClone != null)
                 QueuePairQueueCategory = queuedClone;
-             EnterPairCategText = category.Name;
+            EnterPairCategText = category.Name;
 
             // Suppress RaceEntry Tree publishes while we ClearAll and set defaults
             _suppressRaceEntryPublish = true;
@@ -908,10 +1144,8 @@ namespace PulsarUI.ViewModels
             MaybeDebug(msg2);
 
             // Set EngagePairModeText similarly to QueuePairModeText so UI shows the engaged mode/round
-            string engageModeName = (ModeList != null && EngagePairQueueCategory != null && EngagePairQueueCategory.Mode >= 0 && EngagePairQueueCategory.Mode < ModeList.Count)
-                ? ModeList[EngagePairQueueCategory.Mode]
-                : (ModeList?.FirstOrDefault() ?? string.Empty);
-            EngagePairModeText = $"{engageModeName} Round {EngagePairQueueCategory?.Round ?? 0}";
+            string modeName = EngagePairQueueCategory != null ? EngagePairQueueCategory.Mode.GetDisplayName() : string.Empty;
+            EngagePairModeText = $"{modeName} Round {EngagePairQueueCategory?.Round ?? 0}";
 
             // After engaging, only reset the Enter Pair UI lanes to the EnterPair category default
             // when we engaged from the Enter pair (i.e., no queued entries). Do not clear EnterRacers
@@ -961,10 +1195,62 @@ namespace PulsarUI.ViewModels
                 _ => "Unknown Start Mode"
             };
             SystemEngaged = true;
-            UpdateButtonStatuses();
-            // Publish run configuration (use EngagedRacers collection; new overload handles left/right)
-            if (EngagePairQueueCategory != null)
-                _ = _mqttService.PubRunConfigAsync(EngagePairQueueCategory, EngagedRacers);
+            // Also publish an engaged Pair payload (include GUID and runs) so runqueue consumers see a single object
+            try
+            {
+                var p = new Pair { };
+                p.Id = Guid.NewGuid();
+                // Resolve category similar to OnSystemEngagedChanged
+                Category? resolvedCat = null;
+                if (EngagePairQueueCategory?.CategoryDetails != null && EngagePairQueueCategory.CategoryDetails.Id != 0)
+                    resolvedCat = EngagePairQueueCategory.CategoryDetails;
+                else if (Categories != null)
+                    resolvedCat = Categories.FirstOrDefault(c => c != null && c.Id == EngagePairQueueCategory.Category);
+                p.Category = resolvedCat;
+                p.RunMode = EngagePairQueueCategory?.Mode;
+                // Ensure EngagedRacers has two entries
+                var left = EngagedRacers.ElementAtOrDefault(0) ?? new RaceEntry { Lane = 0, QueueIndex = 2 };
+                var right = EngagedRacers.ElementAtOrDefault(1) ?? new RaceEntry { Lane = 1, QueueIndex = 2 };
+                var leftRun = new Run { Entry = left.Clone(2) };
+                var rightRun = new Run { Entry = right.Clone(2) };
+                p.Runs = new Run[] { leftRun, rightRun };
+                // Populate expected reaction times for the created runs
+                PulsarUI.Services.TimingHelpers.PopulateExpectedReactionTimes(p);
+                // Serialize and publish
+                var options = new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
+                options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase));
+                // Register DateTime converters so RunStartTime serializes with our desired format
+                options.Converters.Add(new PulsarUI.Services.JsonConverters.DateTimeUtcConverter());
+                options.Converters.Add(new PulsarUI.Services.JsonConverters.NullableDateTimeUtcConverter());
+                var minimal = new
+                {
+                    id = p.Id,
+                    categoryId = p.Category?.Id,
+                    runMode = p.RunMode?.ToString(),
+                    runs = p.Runs?.Select(r => new { lane = r.Entry?.Lane, queueIndex = r.Entry?.QueueIndex, raceNumber = r.Entry?.RaceNumber, treeId = r.Entry?.Tree?.Id }).ToArray()
+                };
+                var payload = System.Text.Json.JsonSerializer.Serialize(minimal, options);
+                if (_mqttService != null) _ = _mqttService.PublishMqtt("runqueue/engagedpair/pair", payload);
+
+                // Publish full Pair to debug topic so subscribers can see complete Pair including GUID and computed ReactionTimes
+                try
+                {
+                    if (_mqttService != null)
+                    {
+                        var full = System.Text.Json.JsonSerializer.Serialize(p, options);
+                        _ = _mqttService.PublishMqtt("pulsarui/engagedpair/full", full);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LocalLog("EngagedPair debug publish failed: " + ex.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                MaybeDebug("EngagePair immediate publish failed: " + ex.Message);
+            }
+             UpdateButtonStatuses();
         }
 
         [RelayCommand]
@@ -1065,7 +1351,7 @@ namespace PulsarUI.ViewModels
                 for (int i = 0; i < EnterRacers.Count; i++)
                 {
                     EnterRacers[i].PropertyChanged += EnterPairRacerEntryHandler;
-                     await _mqttService.PubQueueRacersAsync(EnterRacers[i]);
+                    await _mqttService.PubQueueRacersAsync(EnterRacers[i]);
                 }
             }
             UpdateButtonStatuses();
@@ -1097,11 +1383,14 @@ namespace PulsarUI.ViewModels
                 if (!string.IsNullOrWhiteSpace(firstOrder1))
                     EnterPairSelectedCategComboText = firstOrder1;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                LocalLog("CategComboBoxItems firstOrder1 lookup failed: " + ex.Message);
+            }
 
-             // Ensure the selected combo text is initialized now that the category items exist
-             // Prefer selecting startup category by the 2-digit Order parsed from EnterPairSelectedCategComboText
-             Category? startupCategory = null;
+            // Ensure the selected combo text is initialized now that the category items exist
+            // Prefer selecting startup category by the 2-digit Order parsed from EnterPairSelectedCategComboText
+            Category? startupCategory = null;
             try
             {
                 if (!string.IsNullOrWhiteSpace(EnterPairSelectedCategComboText) && EnterPairSelectedCategComboText.Trim().Length >= 2)
@@ -1118,33 +1407,33 @@ namespace PulsarUI.ViewModels
             // Fallback: prefer matching Category.Id if no Order match, else first category
             if (startupCategory == null)
                 startupCategory = Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory?.Category) ?? Categories.FirstOrDefault();
-             if (startupCategory != null)
-             {
-                 EnterPairQueueCategory.CategoryDetails = startupCategory;
-                 EnterPairQueueCategory.Category = startupCategory.Id;
-                 EnterPairQueueCategory.Finish = startupCategory.Finish;
-                 EnterPairCategText = startupCategory.Name;
-                 EnterPairSelectedCategComboText = $"{startupCategory.Order.ToString("D2")} - {startupCategory.Name}";
+            if (startupCategory != null)
+            {
+                EnterPairQueueCategory.CategoryDetails = startupCategory;
+                EnterPairQueueCategory.Category = startupCategory.Id;
+                EnterPairQueueCategory.Finish = startupCategory.Finish;
+                EnterPairCategText = startupCategory.Name;
+                EnterPairSelectedCategComboText = $"{startupCategory.Order.ToString("D2")} - {startupCategory.Name}";
 
-                 // If finish lines are already loaded, ensure SelectedFinishLine matches the category's finish id
-                 if (FinishList != null && FinishList.Count > 0)
-                 {
-                     var finishById = FinishList.FirstOrDefault(f => f != null && f.Id == startupCategory.Finish);
-                     if (finishById != null)
-                         SelectedFinishLine = finishById;
-                 }
-             }
-             else
-             {
-                 EnterPairSelectedCategComboText = CategComboBoxItems.FirstOrDefault();
-             }
+                // If finish lines are already loaded, ensure SelectedFinishLine matches the category's finish id
+                if (FinishList != null && FinishList.Count > 0)
+                {
+                    var finishById = FinishList.FirstOrDefault(f => f != null && f.Id == startupCategory.Finish);
+                    if (finishById != null)
+                        SelectedFinishLine = finishById;
+                }
+            }
+            else
+            {
+                EnterPairSelectedCategComboText = CategComboBoxItems.FirstOrDefault();
+            }
 
-             // Publish/log a small startup message for diagnostics
-             var loadedMsg = $"Loaded {Categories.Count} categories; startupCategoryId={EnterPairQueueCategory?.Category}; selectedFinishId={SelectedFinishLine?.Id}";
-             MaybeDebug(loadedMsg);
+            // Publish/log a small startup message for diagnostics
+            var loadedMsg = $"Loaded {Categories.Count} categories; startupCategoryId={EnterPairQueueCategory?.Category}; selectedFinishId={SelectedFinishLine?.Id}";
+            MaybeDebug(loadedMsg);
 
-             InitializeStartupCategoryAndFinish();
-         }
+            InitializeStartupCategoryAndFinish();
+        }
 
         private async Task LoadTreeTypesAsync()
         {
@@ -1320,36 +1609,36 @@ namespace PulsarUI.ViewModels
 
                 if (startupCategory == null)
                     startupCategory = Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory.Category) ?? Categories.FirstOrDefault();
-                 if (startupCategory != null)
-                 {
-                     EnterPairQueueCategory.CategoryDetails = startupCategory;
-                     EnterPairQueueCategory.Category = startupCategory.Id;
-                     // Ensure the queue item's Finish id matches the category's configured finish
-                     EnterPairQueueCategory.Finish = startupCategory.Finish;
-                     EnterPairCategText = startupCategory.Name;
-                     EnterPairSelectedCategComboText = $"{startupCategory.Order.ToString("D2")} - {startupCategory.Name}";
+                if (startupCategory != null)
+                {
+                    EnterPairQueueCategory.CategoryDetails = startupCategory;
+                    EnterPairQueueCategory.Category = startupCategory.Id;
+                    // Ensure the queue item's Finish id matches the category's configured finish
+                    EnterPairQueueCategory.Finish = startupCategory.Finish;
+                    EnterPairCategText = startupCategory.Name;
+                    EnterPairSelectedCategComboText = $"{startupCategory.Order.ToString("D2")} - {startupCategory.Name}";
 
-                     // If finish lines are loaded, ensure SelectedFinishLine matches the category's finish id
-                     if (FinishList != null && FinishList.Count > 0)
-                     {
-                         var finishById = FinishList.FirstOrDefault(f => f != null && f.Id == startupCategory.Finish);
-                         if (finishById != null)
-                             SelectedFinishLine = finishById;
-                     }
+                    // If finish lines are loaded, ensure SelectedFinishLine matches the category's finish id
+                    if (FinishList != null && FinishList.Count > 0)
+                    {
+                        var finishById = FinishList.FirstOrDefault(f => f != null && f.Id == startupCategory.Finish);
+                        if (finishById != null)
+                            SelectedFinishLine = finishById;
+                    }
 
-                     // Refresh derived textual displays
-                     QueuePairQueueCategoryHandler(QueuePairQueueCategory, new PropertyChangedEventArgs(""));
-                     EngagePairQueueCategoryHandler(EngagePairQueueCategory, new PropertyChangedEventArgs(""));
+                    // Refresh derived textual displays
+                    QueuePairQueueCategoryHandler(QueuePairQueueCategory, new PropertyChangedEventArgs(""));
+                    EngagePairQueueCategoryHandler(EngagePairQueueCategory, new PropertyChangedEventArgs(""));
 
-                     var msg = $"Initialized startupCategoryId={EnterPairQueueCategory.Category}; selectedFinishId={SelectedFinishLine?.Id}";
-                     MaybeDebug(msg);
-                 }
-             }
-             catch (Exception ex)
-             {
-                 LocalLog($"InitializeStartupCategoryAndFinish error: {ex.Message}");
-             }
-         }
+                    var msg = $"Initialized startupCategoryId={EnterPairQueueCategory.Category}; selectedFinishId={SelectedFinishLine?.Id}";
+                    MaybeDebug(msg);
+                }
+            }
+            catch (Exception ex)
+            {
+                LocalLog($"InitializeStartupCategoryAndFinish error: {ex.Message}");
+            }
+        }
 
         // Centralized helper - only publishes/logs when debug flags are enabled
         private void MaybeDebug(string msg)
