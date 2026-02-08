@@ -1,0 +1,33 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:PulsarUI">
+    <Design.PreviewWith>
+        <controls:SensorLabel />
+    </Design.PreviewWith>
+
+    <Style Selector="controls|SensorLabel.Disabled">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <Label Grid.Column="0" Classes="StandardLabelDisabled" Content="—" />
+                    <Label Grid.Column="1" Classes="StandardLabelDisabled" HorizontalAlignment="Center" Content="{TemplateBinding SensorLabelText}" />
+                    <Label Grid.Column="2" Classes="StandardLabelDisabled" Content="—" />
+                </Grid>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="controls|SensorLabel.Enabled">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <Label Grid.Column="0" Classes="StandardLabel" Content="—" />
+                    <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="{TemplateBinding SensorLabelText}" />
+                    <Label Grid.Column="2" Classes="StandardLabel" Content="—" />
+                </Grid>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+</Styles>

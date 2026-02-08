@@ -1,0 +1,26 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:PulsarUI">
+    <Design.PreviewWith>
+        <controls:CompetitorInfo />
+    </Design.PreviewWith>
+
+    <Style Selector="controls|CompetitorInfo">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Grid ColumnDefinitions="*,*,*,*" RowDefinitions="Auto,Auto" Background="{TemplateBinding CIBackground}">
+                    <Label Grid.Row="0" Grid.Column="0" Classes="StandardLabelBold" HorizontalAlignment="Right" Content="Race #" />
+                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
+                        <Label Classes="StandardLabelBold" Content="{TemplateBinding CIClass}" />
+                        <Label Classes="StandardLabelBold" Content="{TemplateBinding CIRaceNum}" />
+                    </StackPanel>
+                    <Label Grid.Row="0" Grid.Column="2" Classes="StandardLabelBold" HorizontalAlignment="Right" Content="Index" />
+                    <Label Grid.Row="0" Grid.Column="3" Classes="StandardLabelBold" HorizontalAlignment="Left" Content="{TemplateBinding CIIndex}" />
+                    <Label Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Classes="StandardLabel" HorizontalAlignment="Center" Content="{TemplateBinding CIName}" />
+                    <Label Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" Classes="StandardLabel" HorizontalAlignment="Center" Content="{TemplateBinding CIModel}" />
+                </Grid>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+</Styles>

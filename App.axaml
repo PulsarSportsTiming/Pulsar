@@ -1,0 +1,55 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:PulsarUI"
+             x:Class="PulsarUI.App">
+    <Application.DataTemplates>
+        <local:ViewLocator/>
+    </Application.DataTemplates>
+
+    <Application.Styles>
+        <FluentTheme/>
+        <StyleInclude Source="/Controls/TimingData.axaml"/>
+        <StyleInclude Source="/Controls/SensorLabel.axaml"/>
+        <StyleInclude Source="/Controls/SensorIcon.axaml"/>
+        <StyleInclude Source="/Icons.axaml"/>
+        <StyleInclude Source="/Controls/SysStatusLabel.axaml"/>
+        <StyleInclude Source="/Controls/CompetitorInfo.axaml"/>
+        <StyleInclude Source="/Controls/EnterPairControl.axaml"/>
+        <StyleInclude Source="/Controls/TitleBar.axaml"/>
+        <StyleInclude Source="/Controls/CategoryButton.axaml"/>
+        <StyleInclude Source="/TextStyles.axaml"/>
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+
+        <Style Selector="Button">
+          <Setter Property="Background" Value="#FF888888"/>
+          <Setter Property="Foreground" Value="#FFA5A5A5"/>
+          <Setter Property="Opacity" Value="1"/>
+        </Style>
+        <Style Selector="Button:disabled">
+          <Setter Property="Background" Value="#FF555555"/>
+          <Setter Property="Opacity" Value="0.7"/>
+        </Style>
+        <Style Selector="Button.FKey:disabled Label.FKeyText">
+          <Setter Property="Foreground" Value="Red"/>
+        </Style>
+        <Style Selector="Label.FKeyText">
+          <Setter Property="Foreground" Value="White"/>
+          <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.FKey:disabled StackPanel.FKeySP Label.FKeyText">
+          <Setter Property="Foreground" Value="#FF222222"/>
+        </Style>
+    </Application.Styles>
+    
+    <Application.Resources>
+        <SolidColorBrush x:Key="StandardLabelColour" Color="#D0D0D0"/>
+        <SolidColorBrush x:Key="DimLabelColour" Color="#909090"/>
+        <SolidColorBrush x:Key="TitleBackground" Color="#3B3B3B"/>
+        <SolidColorBrush x:Key="DetailBackground" Color="#303030"/>
+        <SolidColorBrush x:Key="SysEngagedBackground" Color="#0000FF"/>
+        <SolidColorBrush x:Key="RunActiveBackground" Color="#009900"/>
+        <SolidColorBrush x:Key="ErrorColour" Color="#FF0000"/>
+        <SolidColorBrush x:Key="OkColour" Color="#00FF00"/>
+        <SolidColorBrush x:Key="DisabledColour" Color="#696969"/>
+    </Application.Resources>
+</Application>

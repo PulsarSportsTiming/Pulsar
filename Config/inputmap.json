@@ -1,0 +1,54 @@
+{
+  "RoleMap": {
+    "PreStage": [
+      { "Device": "192.168.20.21", "InputIndex": 1, "lane": 0, "enabled": true },
+      { "Device": "192.168.20.23", "InputIndex": 1, "lane": 1, "enabled": true }
+    ],
+    "StageLock": [
+      { "Device": "192.168.20.21", "InputIndex": 2, "lane": 0, "enabled": true },
+      { "Device": "192.168.20.23", "InputIndex": 2, "lane": 1, "enabled": true }
+    ],
+    "Stage": [
+      { "Device": "192.168.20.21", "InputIndex": 3, "lane": 0, "enabled": true },
+      { "Device": "192.168.20.23", "InputIndex": 3, "lane": 1, "enabled": true }
+    ],
+    "GuardA": [
+      { "Device": "192.168.20.21", "InputIndex": 4, "lane": 0, "enabled": false },
+      { "Device": "192.168.20.23", "InputIndex": 4, "lane": 1, "enabled": false }
+    ],
+    "GuardB": [
+      { "Device": "192.168.20.21", "InputIndex": 5, "lane": 0, "enabled": true },
+      { "Device": "192.168.20.23", "InputIndex": 5, "lane": 1, "enabled": true }
+    ],
+    "RunStartTrigger": { "Device": "192.168.20.25", "InputIndex": 1, "enabled": true }
+  },
+  "DownTrackInputs": [
+    { "Id": { "Device": "192.168.20.21", "InputIndex": 6, "enabled": true }, "distanceMm": 15, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.21", "InputIndex": 7, "enabled": true }, "distanceMm": 18, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.21", "InputIndex": 8, "enabled": true }, "distanceMm": 80, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.22", "InputIndex": 1, "enabled": true }, "distanceMm": 100, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.22", "InputIndex": 2, "enabled": true }, "distanceMm": 180, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.22", "InputIndex": 3, "enabled": true }, "distanceMm": 200, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.22", "InputIndex": 4, "enabled": true }, "distanceMm": 280, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.22", "InputIndex": 5, "enabled": true }, "distanceMm": 300, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.22", "InputIndex": 6, "enabled": true }, "distanceMm": 380, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.22", "InputIndex": 7, "enabled": true }, "distanceMm": 400, "lane": 0, "enabled": true },
+    { "Id": { "Device": "192.168.20.23", "InputIndex": 6, "enabled": true }, "distanceMm": 15, "lane": 1, "enabled": true },
+    { "Id": { "Device": "192.168.20.23", "InputIndex": 7, "enabled": true }, "distanceMm": 18, "lane": 1, "enabled": true },
+    { "Id": { "Device": "192.168.20.23", "InputIndex": 8, "enabled": true }, "distanceMm": 80, "lane": 1, "enabled": true },
+    { "Id": { "Device": "192.168.20.24", "InputIndex": 1, "enabled": true }, "distanceMm": 100, "lane": 1, "enabled": true },
+    { "Id": { "Device": "192.168.20.24", "InputIndex": 2, "enabled": true }, "distanceMm": 180, "lane": 1, "enabled": true },
+    { "Id": { "Device": "192.168.20.24", "InputIndex": 3, "enabled": true }, "distanceMm": 200, "lane": 1, "enabled": true },
+    { "Id": { "Device": "192.168.20.24", "InputIndex": 4, "enabled": true }, "distanceMm": 280, "lane": 1, "enabled": true },
+    { "Id": { "Device": "192.168.20.24", "InputIndex": 5, "enabled": true }, "distanceMm": 300, "lane": 1, "enabled": true },
+    { "Id": { "Device": "192.168.20.24", "InputIndex": 6, "enabled": true }, "distanceMm": 380, "lane": 1, "enabled": true },
+    { "Id": { "Device": "192.168.20.24", "InputIndex": 7, "enabled": true }, "distanceMm": 400, "lane": 1, "enabled": true }
+  ],
+  "SpeedTraps": [
+    { "Id": { "Start": 15, "End": 18}},
+    { "Id": { "Start": 80, "End": 100}},
+    { "Id": { "Start": 180, "End": 200}},
+    { "Id": { "Start": 280, "End": 300}},
+    { "Id": { "Start": 380, "End": 400}}
+  ]
+}

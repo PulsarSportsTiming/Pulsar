@@ -1,0 +1,243 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1024" d:DesignHeight="768"
+        x:Class="PulsarUI.Views.SystemSetupWindow"
+        Title="SystemSetupWindow"
+        Background="Gray">
+    
+    <TabControl TabStripPlacement="Left">
+        <TabItem Header="Test &amp; Diagnostics">
+            <Grid ColumnDefinitions="Auto,*">
+                <!-- Tree control -->
+                <Border Grid.Column="0" BorderThickness="2" BorderBrush="Black" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="20">
+                    <Grid ColumnDefinitions="60,70,60" RowDefinitions="40,40,65,65,65,65,65" Margin="20">
+                        <Grid.Styles>
+                            <Style Selector="Ellipse">
+                                <Setter Property="StrokeThickness" Value="2"/>
+                                <Setter Property="Stroke" Value="#545454"/>
+                            </Style>
+                        </Grid.Styles>
+                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Ellipse Fill="White" Height="23" Width="23" Margin="2" />
+                            <Ellipse Fill="White" Height="23" Width="23" Margin="2" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Ellipse Fill="White" Height="23" Width="23" Margin="2" />
+                            <Ellipse Fill="White" Height="23" Width="23" Margin="2" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Ellipse Fill="White" Height="23" Width="23" Margin="2" />
+                            <Ellipse Fill="White" Height="23" Width="23" Margin="2" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Ellipse Fill="White" Height="23" Width="23" Margin="2" />
+                            <Ellipse Fill="White" Height="23" Width="23" Margin="2" />
+                        </StackPanel>
+                        <Ellipse Grid.Row="0" Grid.Column="1" Grid.RowSpan="2" Fill="Blue" Height="35" Width="35"/>
+                        <Ellipse Grid.Row="2" Grid.Column="0" Fill="Yellow" Height="50" Width="50"/>
+                        <Ellipse Grid.Row="3" Grid.Column="0" Fill="Yellow" Height="50" Width="50"/>
+                        <Ellipse Grid.Row="4" Grid.Column="0" Fill="Yellow" Height="50" Width="50"/>
+                        <Ellipse Grid.Row="5" Grid.Column="0" Fill="Lime" Height="50" Width="50"/>
+                        <Ellipse Grid.Row="6" Grid.Column="0" Fill="Red" Height="50" Width="50"/>
+                        <Ellipse Grid.Row="2" Grid.Column="2" Fill="Yellow" Height="50" Width="50"/>
+                        <Ellipse Grid.Row="3" Grid.Column="2" Fill="Yellow" Height="50" Width="50"/>
+                        <Ellipse Grid.Row="4" Grid.Column="2" Fill="Yellow" Height="50" Width="50"/>
+                        <Ellipse Grid.Row="5" Grid.Column="2" Fill="Lime" Height="50" Width="50"/>
+                        <Ellipse Grid.Row="6" Grid.Column="2" Fill="Red" Height="50" Width="50"/>
+                    </Grid>
+                </Border>
+                <Grid Grid.Column="1" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto,10,Auto,10,Auto" Margin="20">
+                    <!-- Scoreboard control -->
+                    <Grid.Styles>
+                        <Style Selector="TextBox">
+                            <Setter Property="FontSize" Value="53"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                            <Setter Property="VerticalContentAlignment" Value="Center"/>
+                            <Setter Property="Background" Value="Black"/>
+                            <Setter Property="Foreground" Value="#dddddd"/>
+                            <Setter Property="Margin" Value="2"/>
+                            <Setter Property="BorderBrush" Value="White"/>
+                            <Setter Property="BorderThickness" Value="3"/>
+                            <Setter Property="Padding" Value="0"/>
+                        </Style>
+                    </Grid.Styles>
+                    <Label Grid.Row="0" Grid.Column="0" Content="Left ET/RT"/>
+                    <TextBox Grid.Row="1" Grid.Column="0" Text="88.888"/>
+                    <Label Grid.Row="0" Grid.Column="1" Content="Right ET/RT"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="88.888"/>
+                    <Label Grid.Row="2" Grid.Column="0" Content="Left Speed/Index"/>
+                    <TextBox Grid.Row="3" Grid.Column="0" Text="888.88"/>
+                    <Label Grid.Row="2" Grid.Column="1" Content="Left Speed/Index"/>
+                    <TextBox Grid.Row="3" Grid.Column="1" Text="888.88"/>
+                    
+                    <StackPanel Grid.Row ="5" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Label Content="System Test Sequence"/>
+                        <Button>
+                            <PathIcon Data="{StaticResource PlayRegular}" />
+                        </Button>
+                        <Button>
+                            <PathIcon Data="{StaticResource StopRegular}" />
+                        </Button>
+                    </StackPanel>
+                    
+                    <Button Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Content="Startline Alignment Mode"/>
+                </Grid>
+            </Grid>
+        </TabItem>
+        <TabItem Header="Devices &amp; IO">
+            <StackPanel Orientation="Vertical">
+                <DataGrid>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Status"/>
+                        <DataGridTextColumn Header="ID"/>
+                        <DataGridTextColumn Header="Manufacturer"/>
+                        <DataGridTextColumn Header="Model"/>
+                        <DataGridTextColumn Header="Serial #"/>
+                        <DataGridTextColumn Header="IPv4 Address"/>
+                        <DataGridTextColumn Header="MAC Address"/>
+                        <DataGridTextColumn Header="IO Ports"/>
+                        <DataGridTextColumn Header="Input Ports"/>
+                        <DataGridTextColumn Header="Output Ports"/>
+                        <DataGridTextColumn Header="Certification"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <DataGrid>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Status"/>
+                        <DataGridTextColumn Header="ID"/>
+                        <DataGridTextColumn Header="Device ID"/>
+                        <DataGridTextColumn Header="Direction"/>
+                        <DataGridTextColumn Header="Virtual"/>
+                        <DataGridTextColumn Header="Timing Point"/>
+                        <DataGridTextColumn Header="Lane"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </StackPanel>
+        </TabItem>
+        <TabItem Header="Timing Points">
+            <StackPanel Orientation="Vertical">
+                <Label Content="Timing Points"/>
+                <DataGrid Margin="0,0,0,10">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="ID"/>
+                        <DataGridTextColumn Header="Distance"/>
+                        <DataGridTextColumn Header="Description"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <Label Content="Finish Lines"/>
+                <DataGrid Margin="0,0,0,10">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="ID"/>
+                        <DataGridTextColumn Header="Timing Point"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <Label Content="Speed Traps"/>
+                <DataGrid Margin="0,0,0,10">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="ID"/>
+                        <DataGridTextColumn Header="Start"/>
+                        <DataGridTextColumn Header="Stop"/>
+                        <DataGridTextColumn Header="Length"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </StackPanel>
+        </TabItem>
+        <TabItem Header="Categories">
+            <StackPanel Orientation="Vertical">
+                <Label Content="Categories"/>
+                <DataGrid>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="ID"/>
+                        <DataGridTextColumn Header="Order"/>
+                        <DataGridTextColumn Header="Name"/>
+                        <DataGridTextColumn Header="Finish"/>
+                        <DataGridTextColumn Header="Bump"/>
+                        <DataGridTextColumn Header="Tree"/>
+                        <DataGridTextColumn Header="Elim Mode"/>
+                        <DataGridTextColumn Header="Split Tree"/>
+                        <DataGridTextColumn Header="Always Stagger"/>
+                        <DataGridTextColumn Header="Start Mode"/>
+                        <DataGridTextColumn Header="Stage Freeze"/>
+                        <DataGridTextColumn Header="DS Foul"/>
+                        <DataGridTextColumn Header="SB Elim Speed"/>
+                        <DataGridTextColumn Header="SB Units"/>
+                        <DataGridTextColumn Header="Worst Foul"/>
+                        <DataGridTextColumn Header="Foul in Empty"/>
+                        <DataGridTextColumn Header="AS Settle"/>
+                        <DataGridTextColumn Header="AS Timeout"/>
+                        <DataGridTextColumn Header="Default Class"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <Label Content="Classes"/>
+                <DataGrid>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="ID"/>
+                        <DataGridTextColumn Header="Category"/>
+                        <DataGridTextColumn Header="Name"/>
+                        <DataGridTextColumn Header="201m Min"/>
+                        <DataGridTextColumn Header="201m Max"/>
+                        <DataGridTextColumn Header="305m Min"/>
+                        <DataGridTextColumn Header="305m Max"/>
+                        <DataGridTextColumn Header="402m Min"/>
+                        <DataGridTextColumn Header="402m Max"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </StackPanel>
+        </TabItem>
+        <TabItem Header="Racers">
+            <DataGrid x:Name="RacersDataGrid">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="ID"/>
+                    <DataGridTextColumn Header="Category"/>
+                    <DataGridTextColumn Header="Race #"/>
+                    <DataGridTextColumn Header="Class"/>
+                    <DataGridTextColumn Header="Name"/>
+                    <DataGridTextColumn Header="Vehicle"/>
+                    <DataGridTextColumn Header="Personal Index"/>
+                    <DataGridTextColumn Header="Event Index"/>
+                    <DataGridTextColumn Header="Preferred Tree"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </TabItem><TabItem Header="Miscellaneous">
+            <StackPanel Orientation="Vertical">
+                <Label Content="Event"/>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="New"/>
+                    <Button Content="Load"/>
+                </StackPanel>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <Label Content="Units"/>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <RadioButton GroupName="Units" Content="Metric (Distances in metres, speeds in km/h" Padding="5"/>
+                <RadioButton GroupName="Units" Content="Imperial (Distances in feet and fractions of a mile, speeds in mph)" Padding="5"/>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <Label Content="Language"/>
+                <ComboBox>
+                    <ComboBoxItem Content="English"/>
+                    <ComboBoxItem Content="Cymraeg"/>
+                    <ComboBoxItem Content="Deutsch"/>
+                    <ComboBoxItem Content="Malti"/>
+                    <ComboBoxItem Content="Italiano"/>
+                    <ComboBoxItem Content="Svenska"/>
+                    <ComboBoxItem Content="Norsk"/>
+                    <ComboBoxItem Content="Suomi"/>
+                    <ComboBoxItem Content="Dansk"/>
+                    <ComboBoxItem Content="Français"/>
+                    <ComboBoxItem Content="Nederlands"/>
+                    <ComboBoxItem Content="Polski"/>
+                    <ComboBoxItem Content="Magyar"/>
+                    <ComboBoxItem Content="Čeština"/>
+                </ComboBox>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+                <Label Content="Theme"/>
+                <RadioButton GroupName="Theme" Content="Dark"/>
+                <RadioButton GroupName="Theme" Content="Light"/>
+                <RadioButton GroupName="Theme" Content="Pride"/>
+                <Line StartPoint="0,0" EndPoint="100,0" StrokeThickness="1" Stroke="Black"/>
+            </StackPanel>
+        </TabItem>
+    </TabControl>
+</Window>

@@ -1,0 +1,23 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:PulsarUI">
+    <Design.PreviewWith>
+        <controls:CategoryButton />
+    </Design.PreviewWith>
+
+    <Style Selector="controls|CategoryButton">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Button
+                    Content="{TemplateBinding CBCategName}"
+                    Margin="8"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    HorizontalContentAlignment="Stretch"
+                    VerticalContentAlignment="Stretch"
+                    Background="Red"/>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+</Styles>

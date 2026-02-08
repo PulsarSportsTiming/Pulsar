@@ -1,0 +1,34 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:PulsarUI">
+    <Design.PreviewWith>
+        <controls:TimingData />
+    </Design.PreviewWith>
+
+    <Style Selector="controls|TimingData">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Grid ColumnDefinitions="*,Auto,*">
+                    <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="{TemplateBinding TimingLabel}" />
+                    <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="—"/>
+                    <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left" Content="{TemplateBinding TimingValue}"/>
+                </Grid>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="controls|TimingData.Finish">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                
+                <Grid ColumnDefinitions="*,Auto,*">
+                    <Label Grid.Column="0" Classes="StandardLabelBold" HorizontalAlignment="Right" Content="{TemplateBinding TimingLabel}" />
+                    <Label Grid.Column="1" Classes="StandardLabelBold" HorizontalAlignment="Center" Content="—"/>
+                    <Label Grid.Column="2" Classes="StandardLabelBold" HorizontalAlignment="Left" Content="{TemplateBinding TimingValue}"/>
+                </Grid>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+</Styles>

@@ -1,0 +1,25 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:PulsarUI">
+    <Design.PreviewWith>
+        <controls:SysStatusLabel />
+    </Design.PreviewWith>
+
+    <Style Selector="controls|SysStatusLabel.SysEng">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Label Classes="StandardLabelBold" Background="{DynamicResource SysEngagedBackground}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Margin="1" Content="SYSTEM ENGAGED"/>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="controls|SysStatusLabel.RunAct">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Label Classes="StandardLabelBold" Background="{DynamicResource RunActiveBackground}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Margin="1" Content="RUN ACTIVE"/>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+</Styles>

@@ -1,0 +1,52 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:PulsarUI">
+    <Design.PreviewWith>
+        <controls:SensorIcon />
+    </Design.PreviewWith>
+
+    <Style Selector="controls|SensorIcon.OK">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <PathIcon Foreground="{DynamicResource OkColour}" Data="{StaticResource RecordRegular}" />
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="controls|SensorIcon.Error">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <PathIcon Foreground="{DynamicResource ErrorColour}" Data="{StaticResource ErrorCircleRegular}" />
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="controls|SensorIcon.Blocked">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <PathIcon Foreground="{DynamicResource StandardLabelColour}" Data="{StaticResource CircleLineRegular}" />
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="controls|SensorIcon.OKInactive">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <PathIcon Foreground="{DynamicResource DisabledColour}" Data="{StaticResource TimerOffRegular}" />
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
+    <Style Selector="controls|SensorIcon.ErrorInactive">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <PathIcon Foreground="{DynamicResource DisabledColour}" Data="{StaticResource DismissCircleRegular}" />
+            </ControlTemplate>
+        </Setter>
+    </Style>
+</Styles>

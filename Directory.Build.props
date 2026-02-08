@@ -1,0 +1,19 @@
+<Project>
+  <PropertyGroup>
+    <!-- Directory.Build.props was used to disable SDK assembly attribute generation; removed to allow SDK to auto-generate attributes. -->
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Company>Pulsar</Company>
+    <Authors>Pulsar</Authors>
+    <Product>Pulsar</Product>
+    <RepositoryUrl>https://example.invalid</RepositoryUrl>
+  </PropertyGroup>
+
+  <!-- Redirect build outputs (bin/obj) to a local directory outside OneDrive to avoid file sync/truncation issues. -->
+  <PropertyGroup>
+    <!-- Use HOME environment variable so this works on Linux. Adjust if you prefer a different path. -->
+    <BaseOutputPath>$(HOME)/.local/pulsar_builds/$(MSBuildProjectName)/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(HOME)/.local/pulsar_builds/$(MSBuildProjectName)/obj/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>
