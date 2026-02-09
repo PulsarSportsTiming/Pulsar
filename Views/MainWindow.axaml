@@ -104,7 +104,7 @@
             <ItemsControl Grid.Row="1" ItemsSource="{Binding LeftTimingLabels}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <controls:TimingData TimingLabel="{Binding}" TimingValue="" />
+                        <controls:TimingData TimingLabel="{Binding Label}" TimingValue="{Binding Value}" />
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -220,7 +220,7 @@
             <ItemsControl Grid.Row="1" ItemsSource="{Binding RightTimingLabels}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <controls:TimingData TimingLabel="{Binding}" TimingValue="" />
+                        <controls:TimingData TimingLabel="{Binding Label}" TimingValue="{Binding Value}" />
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>

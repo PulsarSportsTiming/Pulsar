@@ -40,10 +40,10 @@ namespace PulsarUI.ViewModels
         private bool _showTestMessagePopup;
         
         [ObservableProperty]
-        private ObservableCollection<string> _leftTimingLabels = new();
+        private ObservableCollection<TimingLabelItem> _leftTimingLabels = new();
 
         [ObservableProperty]
-        private ObservableCollection<string> _rightTimingLabels = new();
+        private ObservableCollection<TimingLabelItem> _rightTimingLabels = new();
 
         // Enable/disable debug publishing and local logging (toggle while diagnosing)
         private readonly bool _enableDebugPublish = false;
@@ -355,6 +355,65 @@ namespace PulsarUI.ViewModels
             {
                 LocalLog("Failed to attach RunManager to MqttService: " + ex.Message);
             }
+            // Subscribe to reaction time computed events so ViewModel can update models and UI
+            try
+            {
+                _mqttService.ReactionTimeComputed += (lane, rtNs, runId, detectionSource) =>
+                {
+                    // Marshal onto UI thread
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        try
+                        {
+                            // Map lane to run index (left=0,right=1)
+                            int runIndex = lane.Equals("left", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+                            var run = EngagedPairModel?.Runs?.ElementAtOrDefault(runIndex);
+                            if (run != null)
+                            {
+                                if (run.ReactionTime == null) run.ReactionTime = new ReactionTime();
+                                run.ReactionTime.ValueNs = rtNs;
+                                // Set trigger/detectionSource if appropriate
+                                if (detectionSource == "stage") run.ReactionTime.Trigger = (lane == "left") ? InputRole.LeftStage : InputRole.RightStage;
+                                else if (detectionSource == "guardA") run.ReactionTime.Trigger = (lane == "left") ? InputRole.LeftGuardA : InputRole.RightGuardA;
+                                else if (detectionSource == "guardB") run.ReactionTime.Trigger = (lane == "left") ? InputRole.LeftGuardB : InputRole.RightGuardB;
+                                else run.ReactionTime.Trigger = (lane == "left") ? InputRole.LeftStage : InputRole.RightStage;
+
+                                // Update the left/right timing label "Reaction Time" value string
+                                var labels = runIndex == 0 ? LeftTimingLabels : RightTimingLabels;
+                                if (labels != null && labels.Count > 0)
+                                {
+                                    // First label is expected to be Reaction Time per TimingLabelHelpers.GenerateTimingLabels
+                                    var first = labels.ElementAtOrDefault(0);
+                                    if (first != null)
+                                    {
+                                        first.Value = run.ReactionTime.Value; // formatted numeric string
+                                    }
+                                }
+
+                                // Also publish the ReactionTime.Value string over MQTT under timingdata/{lane}/reactiontime/string
+                                try
+                                {
+                                    var topic = $"timingdata/{lane}/reactiontime/string";
+                                    var payload = run.ReactionTime.Value ?? string.Empty;
+                                    _ = _mqttService.PublishMqtt(topic, payload);
+                                }
+                                catch (Exception ex)
+                                {
+                                    LocalLog("Failed to publish reaction time string: " + ex.Message);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LocalLog("ReactionTimeComputed handler error: " + ex.Message);
+                        }
+                    });
+                };
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to subscribe to ReactionTimeComputed: " + ex.Message);
+            }
             // Attempt to attach an MQTT client using configuration (if MQTTnet is available at runtime)
             try
             {
@@ -434,7 +493,8 @@ namespace PulsarUI.ViewModels
                         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                         {
                             LeftTimingLabels.Clear();
-                            foreach (var l in leftLabels) LeftTimingLabels.Add(l);
+                            foreach (var l in leftLabels)
+                                LeftTimingLabels.Add(new TimingLabelItem { Label = l, Value = string.Empty });
                         });
                     }
 
@@ -443,7 +503,8 @@ namespace PulsarUI.ViewModels
                         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                         {
                             RightTimingLabels.Clear();
-                            foreach (var l in rightLabels) RightTimingLabels.Add(l);
+                            foreach (var l in rightLabels)
+                                RightTimingLabels.Add(new TimingLabelItem { Label = l, Value = string.Empty });
                         });
                     }
                 }

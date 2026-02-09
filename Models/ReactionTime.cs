@@ -13,5 +13,13 @@ public partial class ReactionTime : ObservableObject
     public decimal RawValue => (ValueNs - ExpectedReactionTimeNs) / 1_000_000_000m;
 
     // Backwards-compatible: formatted value (numeric-only, no unit)
-    public string Value => TimingLabelHelpers.FormatTimeFromNanosecondsNumeric(ValueNs - ExpectedReactionTimeNs);
+    public string Value
+    {
+        get
+        {
+            var deltaNs = ValueNs - ExpectedReactionTimeNs;
+            var formatted = TimingLabelHelpers.FormatTimeFromNanosecondsNumeric(deltaNs);
+            return deltaNs >= 0 ? "+" + formatted : formatted;
+        }
+    }
 }

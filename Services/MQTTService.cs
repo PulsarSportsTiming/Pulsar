@@ -18,6 +18,9 @@ namespace PulsarUI.Services
         // Event raised when a test message is received on the system/testmessage topic
         public event Action<string, string>? TestMessageReceived;
         public event Action<long>? RunStartReceived;
+        // Event raised when a reaction time is computed by RunManager.
+        // Parameters: lane ("left"/"right"), reactionTimeNanoseconds, runId, detectionSource
+        public event Action<string, long, Guid, string>? ReactionTimeComputed;
 
         // Simple diagnostic log helper (append-only)
         private static void AppendLog(string msg)
@@ -427,6 +430,15 @@ namespace PulsarUI.Services
                                                         laneBuf.LastPublishedRunId = runId;
                                                         _ = PublishReactionTimeAsync(lane, rtNs, runId, detectionSource);
                                                         AppendLog($"Published reaction time for lane={lane} rt_ns={rtNs} runId={runId} source={detectionSource}");
+                                                        // Notify subscribers (e.g., ViewModel) so they can attach ReactionTime to the Run model
+                                                        try
+                                                        {
+                                                            ReactionTimeComputed?.Invoke(lane, rtNs, runId, detectionSource);
+                                                        }
+                                                        catch (Exception ex)
+                                                        {
+                                                            AppendLog("ReactionTimeComputed handler threw: " + ex.Message);
+                                                        }
                                                     }
                                                 }
                                                 else if (_runManager == null)
@@ -1087,6 +1099,4 @@ namespace PulsarUI.Services
         }
     }
 }
-
-
 
