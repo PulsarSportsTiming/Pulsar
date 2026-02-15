@@ -104,7 +104,8 @@
             <ItemsControl Grid.Row="1" ItemsSource="{Binding LeftTimingLabels}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <controls:TimingData TimingLabel="{Binding Label}" TimingValue="{Binding Value}" />
+                        <controls:TimingData TimingLabel="{Binding Label}" TimingValue="{Binding Value}" 
+                                           Classes.Finish="{Binding IsBold}" />
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -220,7 +221,8 @@
             <ItemsControl Grid.Row="1" ItemsSource="{Binding RightTimingLabels}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <controls:TimingData TimingLabel="{Binding Label}" TimingValue="{Binding Value}" />
+                        <controls:TimingData TimingLabel="{Binding Label}" TimingValue="{Binding Value}" 
+                                           Classes.Finish="{Binding IsBold}" />
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -392,7 +394,7 @@
                 <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Right" Content="Finish" />
                 <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content=" — " />
                 <Label Grid.Column="2" Classes="StandardLabel" HorizontalAlignment="Left"
-                       Content="{Binding ElementName=FinishLineComboBox, Path=SelectedItem.Description}" />
+                       Content="{Binding ElementName=FinishLineComboBox, Path=SelectedItem.DistanceString}" />
             </Grid>
         </Grid>
         <Grid Grid.Row="5" Grid.Column="1" IsVisible="{Binding SetupActive}"
@@ -416,7 +418,7 @@
                     <Label Classes="StandardLabel" Content="Finish — " />
                     <ComboBox SelectedItem="{Binding SelectedFinishLine, Mode=TwoWay}"
                               IsEnabled="{Binding FinishLineComboActive}"
-                              DisplayMemberBinding="{Binding Description}"
+                              DisplayMemberBinding="{Binding DistanceString}"
                               ItemsSource="{Binding FinishList, Mode=OneWay}" Name="FinishLineComboBox" />
                 </StackPanel>
             </Grid>
@@ -468,14 +470,14 @@
                 </StackPanel>
             </Button>
             <Button Grid.Column="2" x:Name="F3Button" Classes="FKey" HotKey="F3"
-                    Command="{Binding ResetEngagePairCommand}" IsEnabled="{Binding SystemEngaged}">
+                    Command="{Binding ResetEngagePairCommand}" IsEnabled="{Binding IsF3Enabled}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F3" />
                     <Label Classes="FKeyText" Content="Reset" />
                 </StackPanel>
             </Button>
             <Button Grid.Column="3" x:Name="F4Button" Classes="FKey" HotKey="F4"
-                    Command="{Binding SwapEngagedPairCommand}" IsEnabled="{Binding SystemEngaged}">
+                    Command="{Binding SwapEngagedPairCommand}" IsEnabled="{Binding IsF4Enabled}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F4" />
                     <Label Classes="FKeyText" Content="Swap" />
@@ -605,3 +607,4 @@
         </Popup>
     </Grid>
 </Window>
+

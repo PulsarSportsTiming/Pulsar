@@ -68,10 +68,12 @@ namespace PulsarUI.Services
             bool guardBEnabled,
             out long reactionTimeNanoseconds,
             out Guid runId,
-            out string detectionSource)
+            out string detectionSource,
+            out long detectionTimestampNanoseconds)
         {
             reactionTimeNanoseconds = 0;
             runId = Guid.Empty;
+            detectionTimestampNanoseconds = 0;
             detectionSource = "";
             if (!_runs.TryGetValue(Key(device, input), out var info)) return false;
 
@@ -89,6 +91,7 @@ namespace PulsarUI.Services
                 {
                     reactionTimeNanoseconds = Math.Max(0, stageFallTimestampNs.Value - runStart);
                     detectionSource = "stage";
+                    detectionTimestampNanoseconds = stageFallTimestampNs.Value;
                     return true;
                 }
                 return false;
@@ -121,6 +124,7 @@ namespace PulsarUI.Services
                 {
                     reactionTimeNanoseconds = Math.Max(0, chosenTimestamp.Value - runStart);
                     detectionSource = chosenSource;
+                    detectionTimestampNanoseconds = chosenTimestamp.Value;
                     return true;
                 }
                 return false;
@@ -169,6 +173,7 @@ namespace PulsarUI.Services
             {
                 reactionTimeNanoseconds = Math.Max(0, detectionTs.Value - runStart);
                 detectionSource = detSource;
+                detectionTimestampNanoseconds = detectionTs.Value;
                 return true;
             }
 

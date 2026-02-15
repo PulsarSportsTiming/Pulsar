@@ -126,7 +126,6 @@ namespace PulsarUI.Services
                                        categories.disp_order,
                                        categories.name,
                                        categories.finish,
-                                       finish_lines.description AS finish_desc,
                                        categories.run_timeout,
                                        categories.bump_et,
                                        categories.tree,
@@ -202,34 +201,41 @@ namespace PulsarUI.Services
                     RunTimeout = ReadInt("run_timeout"),
                     BumpEt = ReadString("bump_et"),
                     TreeType = ReadInt("tree"),
-                    ElimMode = ReadInt("elim_mode"),
-                    SplitTreeAllowed = ReadBool("split_tree"),
-                    StaggeredStartsAllowed = ReadBool("stagger_tree"),
-                    StartMode = ReadInt("start_mode"),
-                    StageFreeze = ReadBool("stage_freeze"),
-                    DeepStageFoul = ReadBool("ds_foul"),
-                    SbElimSpeed = ReadBool("sb_elim_speed"),
-                    SbCycleUnits = ReadBool("sb_units"),
-                    WorstFoul = ReadBool("worst_foul"),
-                    FoulInEmpty = ReadBool("foul_empty"),
-                    StageSettle = ReadInt("stage_settle"),
-                    AutoStartStageToStart = ReadInt("as_stagetostart"),
-                    AutoStartVariance = ReadInt("as_variance"),
-                    AutoStartTimeout = ReadInt("as_timeout"),
-                    DefaultClass = ReadInt("def_class"),
-                    LastMode = ReadInt("last_mode"),
-                    LastRound = ReadInt("last_round"),
-                    DelayMin = ReadInt("delay_min"),
-                    DelayMax = ReadInt("delay_max"),
-                    FixedTree = ReadBool("fixed_tree"),
-                    FixedTrack = ReadBool("fixed_track"),
-                    SbTimeout = ReadInt("sb_timeout")
                 };
-                categories.Add(category);
-            }
+                // Read elim_mode as int and validate before casting
+                var elimInt = ReadInt("elim_mode");
+                if (System.Enum.IsDefined(typeof(ElimMode), elimInt))
+                    category.ElimMode = (ElimMode)elimInt;
+                else
+                    category.ElimMode = ElimMode.NoBreakout;
+                // Re-open initializer for remaining properties
+                category.SplitTreeAllowed = ReadBool("split_tree");
+                category.StaggeredStartsAllowed = ReadBool("stagger_tree");
+                category.StartMode = ReadInt("start_mode");
+                category.StageFreeze = ReadBool("stage_freeze");
+                category.DeepStageFoul = ReadBool("ds_foul");
+                category.SbElimSpeed = ReadBool("sb_elim_speed");
+                category.SbCycleUnits = ReadBool("sb_units");
+                category.WorstFoul = ReadBool("worst_foul");
+                category.FoulInEmpty = ReadBool("foul_empty");
+                category.StageSettle = ReadInt("stage_settle");
+                category.AutoStartStageToStart = ReadInt("as_stagetostart");
+                category.AutoStartVariance = ReadInt("as_variance");
+                category.AutoStartTimeout = ReadInt("as_timeout");
+                category.DefaultClass = ReadInt("def_class");
+                category.LastMode = ReadInt("last_mode");
+                category.LastRound = ReadInt("last_round");
+                category.DelayMin = ReadInt("delay_min");
+                category.DelayMax = ReadInt("delay_max");
+                category.FixedTree = ReadBool("fixed_tree");
+                category.FixedTrack = ReadBool("fixed_track");
+                category.SbTimeout = ReadInt("sb_timeout");
+                
+                 categories.Add(category);
+             }
 
-            return categories;
-        }
+             return categories;
+         }
 
         public async Task<List<TreeType>> GetTreeTypesAsync()
         {
@@ -276,8 +282,7 @@ namespace PulsarUI.Services
             const string sqlText = """
                                    SELECT
                                        finish_lines.id,
-                                       finish_lines.timing_point,
-                                       finish_lines.description
+                                       timing_points.distance
                                    FROM
                                        finish_lines
                                    JOIN timing_points ON finish_lines.timing_point = timing_points.id
@@ -291,16 +296,14 @@ namespace PulsarUI.Services
             await using var reader = await command.ExecuteReaderAsync();
             
             var idIdx = reader.GetOrdinal("id");
-            var timingPointIdx = reader.GetOrdinal("timing_point");
-            var descriptionIdx = reader.GetOrdinal("description");
+            var distanceIdx = reader.GetOrdinal("distance");
 
             while (await reader.ReadAsync())
             {
                 var finishLine = new FinishLine()
                 {
                     Id = reader.GetInt32(idIdx),
-                    TimingPointId = reader.GetInt32(timingPointIdx),
-                    Description = reader.GetString(descriptionIdx)
+                    Distance = reader.GetInt32(distanceIdx)
                 };
                 finishLines.Add(finishLine);
             }

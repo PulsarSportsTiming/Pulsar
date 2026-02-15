@@ -9,6 +9,10 @@ namespace PulsarUI.Models
         [Description("Run Aborted")]
         Aborted,
         [Description("Breakout")]
-        Breakout
+        Breakout,
+        [Description("Foul")]
+        Foul,
+        [Description("DS Foul")]
+        DsFoul
     }
 }

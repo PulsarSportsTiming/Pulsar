@@ -9,7 +9,7 @@ public class Category
     public int RunTimeout { get; set; }
     public string? BumpEt { get; set; }
     public int TreeType { get; set; }
-    public int ElimMode { get; set; }
+    public ElimMode ElimMode { get; set; }
     public bool SplitTreeAllowed { get; set; }
     public bool StaggeredStartsAllowed { get; set; }
     public int StartMode { get; set; }

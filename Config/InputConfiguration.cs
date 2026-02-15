@@ -15,6 +15,7 @@ namespace PulsarUI.Config
         public Dictionary<InputRole, InputIdentifier> RoleMap { get; set; } = new();
 
         public List<DownTrackInput> DownTrackInputs { get; set; } = new();
+        public List<SpeedTrap> SpeedTraps { get; set; } = new();
 
         private Dictionary<string, InputRole>? _reverseByDeviceInput;
 
@@ -229,24 +230,27 @@ namespace PulsarUI.Config
                                 {
                                     var list = JsonSerializer.Deserialize<List<DownTrackInput>>(prop.Value.GetRawText(), opts) ?? new List<DownTrackInput>();
                                     if (list.Count > 0) cfg.DownTrackInputs = list;
-                                    // Diagnostic dump to help debugging why DownTrackInputs might be empty at runtime
-                                    try
-                                    {
-                                        var sb = new System.Text.StringBuilder();
-                                        sb.AppendLine(DateTime.Now.ToString("o") + " InputConfiguration: parsed DownTrackInputs count=" + list.Count);
-                                        foreach (var d in list)
-                                        {
-                                            sb.AppendLine($"  - Device={d.Id?.Device} InputIndex={d.Id?.InputIndex} DistanceMm={d.DistanceMm} Lane={(int)d.Lane} Enabled={d.Enabled}");
-                                        }
-                                        File.AppendAllText("/tmp/pulsarui_config.log", sb.ToString());
-                                    }
-                                    catch { }
+                                    // (removed verbose local diagnostic writes)
                                 }
                                 catch (Exception ex)
                                 {
                                     Console.Error.WriteLine("InputConfiguration.Load: malformed DownTrackInputs entry: " + ex.Message);
                                 }
-                                break;
+                                // removed break here so SpeedTraps (which may appear after) are still processed
+                            }
+                            // Also support SpeedTraps entry
+                            if (string.Equals(prop.Name, "speedtraps", StringComparison.OrdinalIgnoreCase))
+                            {
+                                try
+                                {
+                                    var list = JsonSerializer.Deserialize<List<SpeedTrap>>(prop.Value.GetRawText(), opts) ?? new List<SpeedTrap>();
+                                    if (list.Count > 0) cfg.SpeedTraps = list;
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.Error.WriteLine("InputConfiguration.Load: malformed SpeedTraps entry: " + ex.Message);
+                                }
+                                // do not break here; allow DownTrackInputs parsing to continue if present
                             }
                         }
                     }

@@ -106,6 +106,17 @@ namespace PulsarUI.ViewModels
 
                 MaybeDebug($"Created EngagedPair {p.Id} CategoryId={p.Category?.Id} Mode={p.RunMode}");
 
+                // Refresh timing labels to show only labels up to the engaged pair's finish line distance
+                if (EngagePairQueueCategory != null && FinishList != null)
+                {
+                    // Look up the finish line distance using the EngagePairQueueCategory's Finish ID
+                    var finishLine = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.Finish);
+                    if (finishLine != null)
+                    {
+                        RefreshTimingLabels(finishLine.Distance);
+                    }
+                }
+
                 // Serialize the Pair consistently for publishing
                 try
                 {
@@ -164,6 +175,12 @@ namespace PulsarUI.ViewModels
                 // Clear when the system is disengaged
                 EngagedPairModel = null;
                 MaybeDebug("Cleared EngagedPairModel due to disengage");
+                
+                // Only restore full list if no category is engaged
+                if (EngagePairQueueCategory?.Category == 0)
+                {
+                    RefreshTimingLabels(0);
+                }
             }
         }
 
@@ -195,6 +212,8 @@ namespace PulsarUI.ViewModels
         private CommunityToolkit.Mvvm.Input.IRelayCommand? _queuePairCommandRef;
         private CommunityToolkit.Mvvm.Input.IRelayCommand? _engagePairCommandRef;
         private CommunityToolkit.Mvvm.Input.IRelayCommand? _clearQueueCommandRef;
+        private CommunityToolkit.Mvvm.Input.IRelayCommand? _resetEngageCommandRef;
+        private CommunityToolkit.Mvvm.Input.IRelayCommand? _swapEngageCommandRef;
 
         public CategQueueItem EnterPairQueueCategory
         {
@@ -299,6 +318,12 @@ namespace PulsarUI.ViewModels
         // Holds the generated Pair when the system becomes engaged
         public Pair? EngagedPairModel { get; private set; }
 
+        // Cache input map data for refreshing timing labels based on engaged category
+        private List<DownTrackInput>? _cachedInputs;
+        private List<SpeedTrap>? _cachedTraps;
+        private string? _cachedDistanceUnit;
+        private string? _cachedSpeedUnit;
+
         public MainWindowViewModel()
         {
             // Short-circuit heavy initialization in design mode so the XAML designer can instantiate this VM safely.
@@ -358,20 +383,28 @@ namespace PulsarUI.ViewModels
             // Subscribe to reaction time computed events so ViewModel can update models and UI
             try
             {
-                _mqttService.ReactionTimeComputed += (lane, rtNs, runId, detectionSource) =>
+                _mqttService.ReactionTimeComputed += (lane, rtNs, runId, detectionSource, detectionTimestampNs) =>
                 {
                     // Marshal onto UI thread
                     Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                     {
                         try
                         {
+                            LocalLog($"ReactionTimeComputed invoked: lane={lane} rtNs={rtNs} runId={runId} detectionSource={detectionSource} detectionTs={detectionTimestampNs}");
                             // Map lane to run index (left=0,right=1)
                             int runIndex = lane.Equals("left", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
                             var run = EngagedPairModel?.Runs?.ElementAtOrDefault(runIndex);
+                            if (run == null)
+                            {
+                                LocalLog($"ReactionTimeComputed: no run found for lane={lane} runIndex={runIndex} EngagedPairModel={(EngagedPairModel==null?"null":"hasRuns="+ (EngagedPairModel.Runs?.Length.ToString() ?? "?"))}");
+                                return;
+                            }
                             if (run != null)
                             {
                                 if (run.ReactionTime == null) run.ReactionTime = new ReactionTime();
                                 run.ReactionTime.ValueNs = rtNs;
+                                // Store the raw detection timestamp (uncalculated)
+                                run.ReactionTime.TriggerTimestampNanoseconds = detectionTimestampNs;
                                 // Set trigger/detectionSource if appropriate
                                 if (detectionSource == "stage") run.ReactionTime.Trigger = (lane == "left") ? InputRole.LeftStage : InputRole.RightStage;
                                 else if (detectionSource == "guardA") run.ReactionTime.Trigger = (lane == "left") ? InputRole.LeftGuardA : InputRole.RightGuardA;
@@ -389,6 +422,58 @@ namespace PulsarUI.ViewModels
                                         first.Value = run.ReactionTime.Value; // formatted numeric string
                                     }
                                 }
+
+                                // Handle Foul remark: if reaction time is negative, mark Foul; otherwise remove it
+                                try
+                                {
+                                    var remarksList = run.Remarks?.ToList() ?? new System.Collections.Generic.List<RunRemarks>();
+                                    // Ensure ExpectedReactionTimeNs has been populated for this run (timing setup may have happened earlier/later)
+                                    if (run.ReactionTime.ExpectedReactionTimeNs == 0)
+                                    {
+                                        try { PulsarUI.Services.TimingHelpers.PopulateExpectedReactionTimes(EngagedPairModel); }
+                                        catch { /* best-effort */ }
+                                    }
+                                    // Determine foul by comparing computed reaction time against expected RT (delta < 0)
+                                    long deltaNs = run.ReactionTime.ValueNs - run.ReactionTime.ExpectedReactionTimeNs;
+                                    if (deltaNs < 0)
+                                    {
+                                        if (!remarksList.Contains(RunRemarks.Foul))
+                                        {
+                                            remarksList.Add(RunRemarks.Foul);
+                                            run.Remarks = remarksList.ToArray();
+                                            // Publish a debug MQTT message so external tools or logs can observe remark changes regardless of local logging
+                                            try { _ = _mqttService.PublishMqtt($"pulsarui/remark/{lane}", $"Added:Foul:{deltaNs}"); } catch { }
+                                            LocalLog($"Added RunRemarks.Foul for lane={lane} deltaNs={deltaNs} ValueNs={run.ReactionTime.ValueNs} ExpectedNs={run.ReactionTime.ExpectedReactionTimeNs}");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (remarksList.Contains(RunRemarks.Foul))
+                                        {
+                                            remarksList.Remove(RunRemarks.Foul);
+                                            run.Remarks = remarksList.ToArray();
+                                            try { _ = _mqttService.PublishMqtt($"pulsarui/remark/{lane}", $"Removed:Foul:{deltaNs}"); } catch { }
+                                            LocalLog($"Removed RunRemarks.Foul for lane={lane} deltaNs={deltaNs}");
+                                        }
+                                    }
+
+                                    // Update the dedicated Remarks label
+                                    if (labels != null && labels.Count > 0)
+                                    {
+                                        var resultIndex = labels.ToList().FindIndex(l => string.Equals(l.Label, "Result", StringComparison.OrdinalIgnoreCase));
+                                        var remarksIndex = resultIndex >= 0 ? resultIndex + 1 : labels.ToList().FindIndex(l => string.Equals(l.Label, "Remarks", StringComparison.OrdinalIgnoreCase));
+                                        if (remarksIndex >= 0 && remarksIndex < labels.Count)
+                                        {
+                                            var remarksText = (run.Remarks != null && run.Remarks.Length > 0)
+                                                ? string.Join(" | ", run.Remarks.Select(r => ((System.Enum)r).GetDisplayName()))
+                                                : string.Empty;
+                                            labels[remarksIndex].Value = remarksText;
+                                            try { _ = _mqttService.PublishMqtt($"pulsarui/remark/{lane}", $"LabelUpdated:{remarksText}"); } catch { }
+                                            LocalLog($"Updated Remarks label for lane={lane} remarks='{remarksText}'");
+                                        }
+                                    }
+                                }
+                                catch (Exception ex) { LocalLog("ReactionTimeComputed remarks update failed: " + ex.Message); }
 
                                 // Also publish the ReactionTime.Value string over MQTT under timingdata/{lane}/reactiontime/string
                                 try
@@ -409,6 +494,143 @@ namespace PulsarUI.ViewModels
                         }
                     });
                 };
+
+                // Subscribe to incremental time events for down-track inputs
+                _mqttService.IncrementalTimeComputed += (lane, downtrackTimestampNs, incNs, speedMpsNullable, runId, dti) =>
+                {
+                    // Marshal onto Avalonia UI thread
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        try
+                        {
+                            // Filter based on engaged category's finish line
+                            if (EngagePairQueueCategory != null && FinishList != null && dti != null)
+                            {
+                                var finishLine = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.Finish);
+                                if (finishLine != null && dti.DistanceMm > finishLine.Distance)
+                                {
+                                    // Ignore timing points beyond the finish line
+                                    MaybeDebug($"Ignoring timing point beyond finish: {dti.DistanceMm}mm > {finishLine.Distance}mm for lane={lane}");
+                                    return;
+                                }
+                            }
+                            MaybeDebug($"VMDBG: IncrementalTimeComputed lane={lane} speed={(speedMpsNullable?.ToString() ?? "<null>")} distance={(dti?.DistanceMm.ToString() ?? "<null>")}");
+                            int runIndex = lane.Equals("left", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+                            var run = EngagedPairModel?.Runs?.ElementAtOrDefault(runIndex);
+                            if (run == null) return;
+
+                            // Prefer to compute incremental relative to the Run's ReactionTime.TriggerTimestampNanoseconds if available
+                            long computedIncNs = incNs;
+                            if (run.ReactionTime != null && run.ReactionTime.TriggerTimestampNanoseconds > 0)
+                            {
+                                try
+                                {
+                                    var delta = downtrackTimestampNs - run.ReactionTime.TriggerTimestampNanoseconds;
+                                    computedIncNs = delta < 0 ? 0 : delta;
+                                }
+                                catch { /* fall back to provided incNs */ }
+                            }
+
+                            // Ensure IncrementalTimes list exists
+                            var incList = run.IncrementalTimes?.ToList() ?? new System.Collections.Generic.List<IncrementalTime>();
+
+                            // Try to find existing entry by DownTrackInput input index and device
+                            var existing = incList.FirstOrDefault(it => it.Input != null && it.Input.Id.InputIndex == dti.Id.InputIndex && it.Input.Id.Device == dti.Id.Device);
+                            if (existing != null)
+                            {
+                                existing.ValueNs = computedIncNs;
+                                existing.Input = dti;
+                            }
+                            else
+                            {
+                                var newIt = new IncrementalTime { ValueNs = computedIncNs, Input = dti };
+                                incList.Add(newIt);
+                            }
+
+                            run.IncrementalTimes = incList.ToArray();
+
+                            // Ensure IncrementalSpeeds list exists and update with computed speed
+                            var speedList = run.IncrementalSpeeds?.ToList() ?? new System.Collections.Generic.List<IncrementalSpeed>();
+                            if (speedMpsNullable.HasValue)
+                            {
+                                var speedVal = speedMpsNullable.Value;
+                                var existingSpeed = speedList.FirstOrDefault(s => s.Input != null && s.Input.Id.InputIndex == dti.Id.InputIndex && s.Input.Id.Device == dti.Id.Device);
+                                if (existingSpeed != null)
+                                {
+                                    existingSpeed.MetersPerSecond = speedVal;
+                                    existingSpeed.Input = dti;
+                                }
+                                else
+                                {
+                                    var newSp = new IncrementalSpeed { MetersPerSecond = speedVal, Input = dti };
+                                    speedList.Add(newSp);
+                                }
+                                run.IncrementalSpeeds = speedList.ToArray();
+                            }
+
+                            // Update UI label corresponding to this DownTrackInput
+                            var etLabel = TimingLabelHelpers.FormatDistanceLabel(dti.DistanceMm, AppSettings.DistanceUnit);
+                            var labels = runIndex == 0 ? LeftTimingLabels : RightTimingLabels;
+                            if (labels != null && labels.Count > 0)
+                            {
+                                var match = labels.FirstOrDefault(l => string.Equals(l.Label, etLabel, StringComparison.OrdinalIgnoreCase));
+                                if (match != null)
+                                {
+                                    match.Value = TimingLabelHelpers.FormatTimeFromNanosecondsNumeric(computedIncNs);
+                                }
+                            }
+
+                            // Update the speed-trap label which follows the ET label (if present)
+                            try
+                            {
+                                if (labels != null && labels.Count > 0)
+                                {
+                                    var speedLabel = TimingLabelHelpers.FormatSpeedTrapLabel(dti.DistanceMm, AppSettings.DistanceUnit, AppSettings.SpeedUnit);
+                                    var spMatch = labels.FirstOrDefault(l => string.Equals(l.Label, speedLabel, StringComparison.OrdinalIgnoreCase));
+                                    if (spMatch != null)
+                                    {
+                                        if (speedMpsNullable.HasValue)
+                                            spMatch.Value = TimingLabelHelpers.FormatSpeed(speedMpsNullable.Value);
+                                        else
+                                            spMatch.Value = string.Empty; // clear when speed not yet available
+                                    }
+                                }
+                            }
+                            catch { }
+
+                            // Also publish the incrementaltime as a plain string topic for compatibility
+                            try
+                            {
+                                var topic = $"timingdata/{lane}/incrementaltime/string";
+                                var payload = TimingLabelHelpers.FormatTimeFromNanosecondsNumeric(computedIncNs);
+                                _ = _mqttService.PublishMqtt(topic, payload);
+                            }
+                            catch (Exception ex)
+                            {
+                                LocalLog("Failed to publish incremental time string: " + ex.Message);
+                            }
+
+                            // Publish the speed as a plain string topic only when available
+                            try
+                            {
+                                if (speedMpsNullable.HasValue)
+                                {
+                                    var topicSp = $"timingdata/{lane}/speedtrap/string";
+                                    var payloadSp = TimingLabelHelpers.FormatSpeed(speedMpsNullable.Value);
+                                    _ = _mqttService.PublishMqtt(topicSp, payloadSp);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                LocalLog("Failed to publish speed string: " + ex.Message);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LocalLog("IncrementalTimeComputed handler error: " + ex.Message);
+                        }
+                    });
+                 };
             }
             catch (Exception ex)
             {
@@ -433,14 +655,14 @@ namespace PulsarUI.ViewModels
             }
             catch (Exception ex)
             {
-                try { File.AppendAllText("/tmp/pulsar_mqtt.log", DateTime.Now.ToString("o") + "Failed to attach MQTT client: " + ex.Message + "\n"); } catch { }
+                MaybeDebug("Failed to attach MQTT client: " + ex.Message);
             }
             // Attempt to attach the InputMapService from the app config path so MQTT lookups can resolve down-track inputs
             try
             {
                 // Use the same 'Config' folder casing as the project so the file copied to build output is found on case-sensitive filesystems
                 var inputMapPath = Path.Combine(AppContext.BaseDirectory, "Config", "inputmap.json");
-                try { File.AppendAllText("/tmp/pulsarui_config.log", DateTime.Now.ToString("o") + " MainWindowViewModel: trying inputMapPath='" + inputMapPath + "' exists=" + File.Exists(inputMapPath) + "\n"); } catch { }
+                MaybeDebug("MainWindowViewModel: trying inputMapPath='" + inputMapPath + "' exists=" + File.Exists(inputMapPath));
                 var ims = new InputMapService(inputMapPath);
                 _mqttService.AttachInputMapService(ims);
             }
@@ -486,27 +708,15 @@ namespace PulsarUI.ViewModels
                     var distanceUnit = configuration["Units:Distance"] ?? "m";
                     var speedUnit = configuration["Units:Speed"] ?? "km/h";
 
-                    var labelsPerLane = TimingLabelHelpers.GenerateTimingLabels(inputs, traps, distanceUnit, speedUnit);
+                    // Cache the input map data for later use when refreshing labels based on engaged category
+                    _cachedInputs = inputs;
+                    _cachedTraps = traps;
+                    _cachedDistanceUnit = distanceUnit;
+                    _cachedSpeedUnit = speedUnit;
 
-                    if (labelsPerLane.TryGetValue(InputLane.Left, out var leftLabels))
-                    {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                        {
-                            LeftTimingLabels.Clear();
-                            foreach (var l in leftLabels)
-                                LeftTimingLabels.Add(new TimingLabelItem { Label = l, Value = string.Empty });
-                        });
-                    }
+                    // Initialize timing labels with full list (no finish line restriction)
+                    RefreshTimingLabels(0);
 
-                    if (labelsPerLane.TryGetValue(InputLane.Right, out var rightLabels))
-                    {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                        {
-                            RightTimingLabels.Clear();
-                            foreach (var l in rightLabels)
-                                RightTimingLabels.Add(new TimingLabelItem { Label = l, Value = string.Empty });
-                        });
-                    }
                 }
                 else
                 {
@@ -562,6 +772,123 @@ namespace PulsarUI.ViewModels
                 LocalLog("Failed to wire RunStartReceived handler: " + ex.Message);
             }
              
+            // Wire LaneNoVehicleChanged so ViewModel can mark Run.Remarks and update Result label
+            try
+            {
+                _mqttService.LaneNoVehicleChanged += (lane, noVehicle) =>
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        try
+                        {
+                            if (EngagedPairModel?.Runs == null) return;
+                            int runIndex = string.Equals(lane, "left", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+                            var run = EngagedPairModel.Runs.ElementAtOrDefault(runIndex);
+                            if (run == null) return;
+
+                            var remarksList = run.Remarks?.ToList() ?? new System.Collections.Generic.List<RunRemarks>();
+                            if (noVehicle)
+                            {
+                                if (!remarksList.Contains(RunRemarks.NoVehicleStaged))
+                                {
+                                    remarksList.Add(RunRemarks.NoVehicleStaged);
+                                    run.Remarks = remarksList.ToArray();
+                                }
+                            }
+                            else
+                            {
+                                if (remarksList.Contains(RunRemarks.NoVehicleStaged))
+                                {
+                                    remarksList.Remove(RunRemarks.NoVehicleStaged);
+                                    run.Remarks = remarksList.ToArray();
+                                }
+                            }
+
+                            // Update the dedicated Remarks label (always present) to reflect current remarks for that run
+                            var labels = runIndex == 0 ? LeftTimingLabels : RightTimingLabels;
+                            if (labels != null && labels.Count > 0)
+                            {
+                                var resultIndex = labels.ToList().FindIndex(l => string.Equals(l.Label, "Result", StringComparison.OrdinalIgnoreCase));
+                                var remarksIndex = resultIndex >= 0 ? resultIndex + 1 : labels.ToList().FindIndex(l => string.Equals(l.Label, "Remarks", StringComparison.OrdinalIgnoreCase));
+                                if (remarksIndex >= 0 && remarksIndex < labels.Count)
+                                {
+                                    var remarksText = (run.Remarks != null && run.Remarks.Length > 0)
+                                        ? string.Join(" | ", run.Remarks.Select(r => ((System.Enum)r).GetDisplayName()))
+                                        : string.Empty;
+                                    labels[remarksIndex].Value = remarksText;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LocalLog("LaneNoVehicleChanged handler error: " + ex.Message);
+                        }
+                    });
+                };
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to wire LaneNoVehicleChanged handler: " + ex.Message);
+            }
+
+            // Wire LaneDsFoulChanged so ViewModel can mark Run.Remarks for DS fouls
+            try
+            {
+                _mqttService.LaneDsFoulChanged += (lane, dsFoul) =>
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        try
+                        {
+                            if (EngagedPairModel?.Runs == null) return;
+                            int runIndex = string.Equals(lane, "left", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+                            var run = EngagedPairModel.Runs.ElementAtOrDefault(runIndex);
+                            if (run == null) return;
+
+                            var remarksList = run.Remarks?.ToList() ?? new System.Collections.Generic.List<RunRemarks>();
+                            if (dsFoul)
+                            {
+                                if (!remarksList.Contains(RunRemarks.DsFoul))
+                                {
+                                    remarksList.Add(RunRemarks.DsFoul);
+                                    run.Remarks = remarksList.ToArray();
+                                }
+                            }
+                            else
+                            {
+                                if (remarksList.Contains(RunRemarks.DsFoul))
+                                {
+                                    remarksList.Remove(RunRemarks.DsFoul);
+                                    run.Remarks = remarksList.ToArray();
+                                }
+                            }
+
+                            // Update the dedicated Remarks label
+                            var labels = runIndex == 0 ? LeftTimingLabels : RightTimingLabels;
+                            if (labels != null && labels.Count > 0)
+                            {
+                                var resultIndex = labels.ToList().FindIndex(l => string.Equals(l.Label, "Result", StringComparison.OrdinalIgnoreCase));
+                                var remarksIndex = resultIndex >= 0 ? resultIndex + 1 : labels.ToList().FindIndex(l => string.Equals(l.Label, "Remarks", StringComparison.OrdinalIgnoreCase));
+                                if (remarksIndex >= 0 && remarksIndex < labels.Count)
+                                {
+                                    var remarksText = (run.Remarks != null && run.Remarks.Length > 0)
+                                        ? string.Join(" | ", run.Remarks.Select(r => ((System.Enum)r).GetDisplayName()))
+                                        : string.Empty;
+                                    labels[remarksIndex].Value = remarksText;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LocalLog("LaneDsFoulChanged handler error: " + ex.Message);
+                        }
+                    });
+                };
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to wire LaneDsFoulChanged handler: " + ex.Message);
+            }
 
             EnterPairQueueCategory = new CategQueueItem
             {
@@ -655,6 +982,9 @@ namespace PulsarUI.ViewModels
             _queuePairCommandRef = QueuePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
             _engagePairCommandRef = EngagePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
             _clearQueueCommandRef = ClearQueueCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
+            // Capture Reset/Swap command refs so we can update their CanExecute when RunActive changes
+            _resetEngageCommandRef = ResetEngagePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
+            _swapEngageCommandRef = SwapEngagedPairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
 
             // Keep handlers in sync if collection items are replaced or changed
             EnterRacers.CollectionChanged += (s, e) =>
@@ -819,11 +1149,11 @@ namespace PulsarUI.ViewModels
                 if (FinishList != null && QueuePairQueueCategory != null)
                 {
                     var fl = FinishList.FirstOrDefault(f => f != null && f.Id == QueuePairQueueCategory.Finish);
-                    if (fl != null) finishDesc = fl.Description ?? string.Empty;
+                    if (fl != null) finishDesc = fl.DistanceString ?? string.Empty;
                     else if (QueuePairQueueCategory?.CategoryDetails != null)
                     {
                         var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == QueuePairQueueCategory.CategoryDetails.Finish);
-                        if (fl2 != null) finishDesc = fl2.Description ?? string.Empty;
+                        if (fl2 != null) finishDesc = fl2.DistanceString ?? string.Empty;
                     }
                 }
                 QueuePairFinishText = finishDesc;
@@ -851,15 +1181,15 @@ namespace PulsarUI.ViewModels
             if (EngagePairQueueCategory == null)
                 return;
             // Update textual finish and mode for the engaged pair based on stored Finish id
-            string finishDesc = string.Empty;
+            var finishDesc = string.Empty;
             if (FinishList != null && EngagePairQueueCategory != null)
             {
                 var fl = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.Finish);
-                if (fl != null) finishDesc = fl.Description ?? string.Empty;
+                if (fl != null) finishDesc = fl.DistanceString ?? string.Empty;
                 else if (EngagePairQueueCategory?.CategoryDetails != null)
                 {
                     var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.CategoryDetails.Finish);
-                    if (fl2 != null) finishDesc = fl2.Description ?? string.Empty;
+                    if (fl2 != null) finishDesc = fl2.DistanceString ?? string.Empty;
                 }
             }
             EngagePairFinishText = finishDesc;
@@ -1053,16 +1383,16 @@ namespace PulsarUI.ViewModels
             string finishDesc = string.Empty;
             if (SelectedFinishLine != null)
             {
-                finishDesc = SelectedFinishLine.Description ?? string.Empty;
+                finishDesc = SelectedFinishLine.DistanceString ?? string.Empty;
             }
             else if (FinishList != null && EnterPairQueueCategory != null)
             {
                 var fl = FinishList.FirstOrDefault(f => f != null && f.Id == EnterPairQueueCategory.Finish);
-                if (fl != null) finishDesc = fl.Description ?? string.Empty;
+                if (fl != null) finishDesc = fl.DistanceString ?? string.Empty;
                 else if (EnterPairQueueCategory?.CategoryDetails != null)
                 {
                     var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == EnterPairQueueCategory.CategoryDetails.Finish);
-                    if (fl2 != null) finishDesc = fl2.Description ?? string.Empty;
+                    if (fl2 != null) finishDesc = fl2.DistanceString ?? string.Empty;
                 }
             }
 
@@ -1182,14 +1512,14 @@ namespace PulsarUI.ViewModels
                 if (FinishList != null)
                 {
                     var fl = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.Finish);
-                    if (fl != null) engageFinishDesc = fl.Description ?? string.Empty;
+                    if (fl != null) engageFinishDesc = fl.DistanceString ?? string.Empty;
                 }
 
                 // If still empty, prefer CategoryDetails' Finish id
                 if (string.IsNullOrEmpty(engageFinishDesc) && EngagePairQueueCategory.CategoryDetails != null && FinishList != null)
                 {
                     var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.CategoryDetails.Finish);
-                    if (fl2 != null) engageFinishDesc = fl2.Description ?? string.Empty;
+                    if (fl2 != null) engageFinishDesc = fl2.DistanceString ?? string.Empty;
                 }
 
                 // Finally fall back to previously computed QueuePairFinishText when engaging from queue
@@ -1599,8 +1929,8 @@ namespace PulsarUI.ViewModels
                         // Debug: publish finish list and initial mapping
                         try
                         {
-                            var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.Description}"));
-                            var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
+                            var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.DistanceString}"));
+                            var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
                             MaybeDebug(initialMapping);
                         }
                         catch (Exception) { /* ignore logging errors */ }
@@ -1621,7 +1951,7 @@ namespace PulsarUI.ViewModels
 
                         try
                         {
-                            var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.Description}"));
+                            var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.DistanceString}"));
                             var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
                             MaybeDebug(initialMapping);
                         }
@@ -1634,7 +1964,7 @@ namespace PulsarUI.ViewModels
 
                 try
                 {
-                    var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.Description}"));
+                    var listSummary = string.Join(", ", FinishList.Select(f => $"{f.Id}:{f.DistanceString}"));
                     var initialMapping = $"FinishList={listSummary}; EnterPairQueueCategory.Finish={EnterPairQueueCategory?.Finish}; SelectedFinishLineId={SelectedFinishLine?.Id}";
                     MaybeDebug(initialMapping);
                 }
@@ -1706,12 +2036,23 @@ namespace PulsarUI.ViewModels
         {
             if (_enableLocalLog)
             {
-                try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n"); } catch (Exception) { /* ignore logging failures */ }
+                try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n"); } catch (Exception) { /* ignore */ }
             }
             if (_enableDebugPublish && _mqttService != null)
             {
-                try { _ = _mqttService.PublishMqtt("pulsarui/debug", msg); } catch (Exception) { if (_enableLocalLog) { try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " PublishMqtt failed\n"); } catch { } } }
+                try { _ = _mqttService.PublishMqtt("pulsarui/debug", msg); } catch (Exception) { if (_enableLocalLog) { MaybeDebug("PublishMqtt failed"); } }
             }
+        }
+
+        // Local logging helper used throughout ViewModel
+        private void LocalLog(string msg)
+        {
+            if (!_enableLocalLog) return;
+            try
+            {
+                File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n");
+            }
+            catch { }
         }
 
         // F5 (Queue) is enabled if any EnterRacers have a RaceNumber and all QueuedRacers are empty
@@ -1730,7 +2071,11 @@ namespace PulsarUI.ViewModels
         public bool IsF11Enabled =>
             QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
 
-        
+        // F3 (Reset) enabled when system is engaged and not currently running
+        public bool IsF3Enabled => SystemEngaged && !RunActive;
+
+        // F4 (Swap) enabled when system is engaged and not currently running
+        public bool IsF4Enabled => SystemEngaged && !RunActive;
 
 
         // Centralized helper to update all button-related bindings
@@ -1739,17 +2084,85 @@ namespace PulsarUI.ViewModels
             OnPropertyChanged(nameof(IsF5Enabled));
             OnPropertyChanged(nameof(IsF10Enabled));
             OnPropertyChanged(nameof(IsF11Enabled));
+            OnPropertyChanged(nameof(IsF3Enabled));
+            OnPropertyChanged(nameof(IsF4Enabled));
+
+            // Notify generated command refs so UI CanExecute is re-evaluated
+            try { _resetEngageCommandRef?.NotifyCanExecuteChanged(); } catch { }
+            try { _swapEngageCommandRef?.NotifyCanExecuteChanged(); } catch { }
+            try { _queuePairCommandRef?.NotifyCanExecuteChanged(); } catch { }
+            try { _engagePairCommandRef?.NotifyCanExecuteChanged(); } catch { }
+            try { _clearQueueCommandRef?.NotifyCanExecuteChanged(); } catch { }
         }
 
-        private void LocalLog(string msg)
+        // CanExecute helpers used by the CommunityToolkit source generator for the generated commands
+        // Naming convention: Can<MethodName>() will be discovered and used as the CanExecute predicate.
+        private bool CanResetEngagePair()
         {
-            if (!_enableLocalLog) return;
-            try
+            return SystemEngaged && !RunActive;
+        }
+
+        private bool CanSwapEngagedPair()
+        {
+            return SystemEngaged && !RunActive;
+        }
+
+        // Refresh timing labels based on engaged category's finish line distance.
+        // If finishLineMm > 0, only labels up to that distance are displayed (before Result).
+        // If finishLineMm == 0, the full list of labels is displayed.
+        private void RefreshTimingLabels(int finishLineMm)
+        {
+            if (_cachedInputs == null || _cachedDistanceUnit == null || _cachedSpeedUnit == null)
+                return;
+
+            var labelsPerLane = TimingLabelHelpers.GenerateTimingLabels(
+                _cachedInputs,
+                _cachedTraps,
+                _cachedDistanceUnit,
+                _cachedSpeedUnit,
+                finishLineMm);
+
+            if (labelsPerLane.TryGetValue(InputLane.Left, out var leftLabels))
             {
-                File.AppendAllText("/tmp/pulsarui_debug.log", DateTime.Now.ToString("o") + " " + msg + "\n");
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    LeftTimingLabels.Clear();
+                    foreach (var l in leftLabels)
+                        LeftTimingLabels.Add(l);
+                    // Ensure a dedicated Remarks label exists immediately after Result and remains visible
+                    var idx = LeftTimingLabels.ToList().FindIndex(x => string.Equals(x.Label, "Result", StringComparison.OrdinalIgnoreCase));
+                    if (idx >= 0)
+                    {
+                        var next = idx + 1;
+                        if (!(next < LeftTimingLabels.Count && string.Equals(LeftTimingLabels[next].Label, "Remarks", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            LeftTimingLabels.Insert(next, new TimingLabelItem { Label = "Remarks", Value = string.Empty });
+                        }
+                    }
+                });
             }
-            catch (Exception) { /* ignore */ }
+
+            if (labelsPerLane.TryGetValue(InputLane.Right, out var rightLabels))
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    RightTimingLabels.Clear();
+                    foreach (var l in rightLabels)
+                        RightTimingLabels.Add(l);
+                    // Ensure a dedicated Remarks label exists immediately after Result and remains visible
+                    var idx = RightTimingLabels.ToList().FindIndex(x => string.Equals(x.Label, "Result", StringComparison.OrdinalIgnoreCase));
+                    if (idx >= 0)
+                    {
+                        var next = idx + 1;
+                        if (!(next < RightTimingLabels.Count && string.Equals(RightTimingLabels[next].Label, "Remarks", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            RightTimingLabels.Insert(next, new TimingLabelItem { Label = "Remarks", Value = string.Empty });
+                        }
+                    }
+                });
+            }
         }
     }
 }
+
 

@@ -5,26 +5,16 @@ namespace PulsarUI.Models;
 
 public partial class IncrementalSpeed : ObservableObject
 {
-    [ObservableProperty] private long _deltaNs;
-    [ObservableProperty] private SpeedTrap? _trap;
+    // Speed stored as meters per second
+    [ObservableProperty] private decimal _metersPerSecond;
+    [ObservableProperty] private DownTrackInput? _input;
 
-    public decimal RawValue
-    {
-        get
-        {
-            if (Trap == null)
-                return 0m;
+    // Raw value (m/s)
+    public decimal RawValue => MetersPerSecond;
 
-            var distanceMm = Trap.EndMm - Trap.StartMm;
-            if (distanceMm <= 0 || DeltaNs <= 0)
-                return 0m;
+    // Backwards-compatible: formatted value (includes unit) e.g. "36.5 km/h"
+    public string Value => TimingLabelHelpers.FormatSpeed(MetersPerSecond);
 
-            var distanceMeters = distanceMm / 1000m;
-            var timeSeconds = DeltaNs / 1_000_000_000m;
-            return distanceMeters / timeSeconds; // Raw value in m/s
-        }
-    }
-
-    // Backwards-compatible: formatted value (numeric-only, no unit)
-    public string Value => TimingLabelHelpers.FormatSpeedNumeric(RawValue);
+    // Numeric-only formatted value
+    public string ValueNumeric => TimingLabelHelpers.FormatSpeedNumeric(MetersPerSecond);
 }

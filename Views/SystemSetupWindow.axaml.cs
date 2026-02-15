@@ -9,9 +9,6 @@ public partial class SystemSetupWindow : Window
     public SystemSetupWindow()
     {
         InitializeComponent();
-#if DEBUG
-        this.AttachDevTools();
-#endif
     }
 
     private void InitializeComponent()

@@ -67,4 +67,18 @@ public static class AppSettings
             _ => 1m
         };
     }
+    
+    public static decimal GetDistanceConversionFactor(string? distanceUnit = null)
+    {
+        var unit = (distanceUnit ?? DistanceUnit).Trim().ToLowerInvariant();
+
+        return unit switch
+        {
+            "mm" or "millimetre" or "millimetres" or "millimeter" or "millimeters" => 1m,
+            "m" or "meter" or "metre" or "meters" or "metres" => 0.001m,
+            "km" or "kilometer" or "kilometre" or "kilometers" or "kilometres" => 0.000001m,
+            "ft" or "foot" or "feet" => 0.00328084m,
+            _ => 0.001m
+        };
+    }
 }

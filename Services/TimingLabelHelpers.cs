@@ -24,13 +24,13 @@ namespace PulsarUI.Services
         }
 
         // New: numeric-only time (no unit)
-        public static string FormatTimeNumeric(decimal seconds)
+        private static string FormatTimeNumeric(decimal seconds)
         {
             return FormatTimeInternal(seconds, false);
         }
 
         // New: convenience for nanoseconds input
-        public static string FormatTimeFromNanoseconds(long nanoseconds)
+        private static string FormatTimeFromNanoseconds(long nanoseconds)
         {
             return FormatTime(nanoseconds / 1_000_000_000m);
         }
@@ -44,15 +44,13 @@ namespace PulsarUI.Services
         // New: nullable nanoseconds overload
         public static string FormatTimeNullable(long? nanoseconds)
         {
-            if (!nanoseconds.HasValue) return string.Empty;
-            return FormatTimeFromNanoseconds(nanoseconds.Value);
+            return !nanoseconds.HasValue ? string.Empty : FormatTimeFromNanoseconds(nanoseconds.Value);
         }
 
         // New: nullable numeric-only nanoseconds overload
         public static string FormatTimeNullableNumeric(long? nanoseconds)
         {
-            if (!nanoseconds.HasValue) return string.Empty;
-            return FormatTimeFromNanosecondsNumeric(nanoseconds.Value);
+            return !nanoseconds.HasValue ? string.Empty : FormatTimeFromNanosecondsNumeric(nanoseconds.Value);
         }
 
         // Internal helper for speed formatting. includeUnit controls whether to append the unit string.
@@ -60,6 +58,11 @@ namespace PulsarUI.Services
         {
             var factor = AppSettings.GetSpeedConversionFactor();
             var converted = metersPerSecond * factor;
+            try
+            {
+                System.IO.File.AppendAllText("/tmp/pulsar_mqtt.log", DateTime.Now.ToString("o") + " FormatSpeedInternal: raw_mps=" + metersPerSecond + " factor=" + factor + " converted=" + converted + " unit=" + AppSettings.SpeedUnit + "\n");
+            }
+            catch { }
             var rounded = Math.Round(converted, AppSettings.SpeedResolution, MidpointRounding.AwayFromZero);
             var s = rounded.ToString($"F{AppSettings.SpeedResolution}", CultureInfo.InvariantCulture);
             return includeUnit ? s + " " + AppSettings.SpeedUnit : s;
@@ -88,33 +91,32 @@ namespace PulsarUI.Services
             
             
 
-            if (unit == "mi" || unit == "miles")
+            switch (unit)
             {
                 // exact fractional mile matches (strict mm equality)
-                if (distanceMm == 201168) return "1/8 mi ET";
-                if (distanceMm == 402336) return "1/4 mi ET";
-
+                case "mi" or "miles" when distanceMm == 201168:
+                    return "1/8 mi";
+                case "mi" or "miles" when distanceMm == 402336:
+                    return "1/4 mi";
                 // default: show as feet with apostrophe
-                var feet = (long)Math.Round(distanceMm / 304.8);
-                return $"{feet}' ET";
-            }
-
-            if (unit == "ft" || unit == "feet")
-            {
-                var feet = (long)Math.Round(distanceMm / 304.8);
-                return $"{feet}' ET";
-            }
-            
-            // Support millimetres explicitly (raw mm value)
-            if (unit == "mm" || unit == "millimeters" || unit == "millimetres" || unit == "millimetre")
-            {
-                return $"{distanceMm}mm ET";
+                case "mi" or "miles":
+                case "ft" or "feet":
+                {
+                    var feet = (long)Math.Round(distanceMm / 304.8);
+                    return $"{feet}";
+                }
+                // Support millimetres explicitly (raw mm value)
+                case "mm":
+                case "millimeters":
+                case "millimetres":
+                case "millimetre":
+                    return $"{distanceMm}mm";
             }
 
             // default: meters
             var meters = distanceMm / 1000.0;
             var s = meters.ToString("F3", CultureInfo.InvariantCulture).TrimEnd('0').TrimEnd('.');
-            return $"{s}m ET";
+            return $"{s}m";
         }
 
         // Format a speed-trap label that matches the distance representation used by FormatDistanceLabel,
@@ -123,28 +125,26 @@ namespace PulsarUI.Services
         public static string FormatSpeedTrapLabel(int distanceMm, string distanceUnit, string speedUnit)
         {
             var distLabel = FormatDistanceLabel(distanceMm, distanceUnit);
-            if (distLabel.EndsWith(" ET", StringComparison.Ordinal))
-                distLabel = distLabel.Substring(0, distLabel.Length - 3);
 
             var unit = string.IsNullOrWhiteSpace(speedUnit) ? AppSettings.SpeedUnit : speedUnit;
-            if (string.IsNullOrWhiteSpace(unit))
-                return distLabel;
-
-            return $"{distLabel} {unit}";
+            return string.IsNullOrWhiteSpace(unit) ? distLabel : $"{distLabel} {unit}";
         }
 
         // Generate per-lane timing label sequences from DownTrackInputs and SpeedTraps using strict mm equality for matching.
         // Returns a dictionary keyed by lane (InputLane.Left/InputLane.Right) with the ordered labels for that lane.
         // Each lane list contains: "Reaction Time", ET labels, any matching speed-trap labels immediately after the ET, then "Result".
-        public static Dictionary<InputLane, List<string>> GenerateTimingLabels(
+        // If finishLineMm is specified (> 0), only labels up to and including that distance are included (before "Result").
+        // Labels at the finish line distance are marked with IsBold = true.
+        public static Dictionary<InputLane, List<TimingLabelItem>> GenerateTimingLabels(
             List<DownTrackInput>? inputs,
             List<SpeedTrap>? traps,
             string distanceUnit,
-            string speedUnit)
+            string speedUnit,
+            int finishLineMm = 0)
         {
-            var result = new Dictionary<InputLane, List<string>>();
-            result[InputLane.Left] = new List<string>();
-            result[InputLane.Right] = new List<string>();
+            var result = new Dictionary<InputLane, List<TimingLabelItem>>();
+            result[InputLane.Left] = new List<TimingLabelItem>();
+            result[InputLane.Right] = new List<TimingLabelItem>();
 
             if (inputs == null) return result;
 
@@ -154,27 +154,32 @@ namespace PulsarUI.Services
                 .GroupBy(i => i.Lane)
                 .ToDictionary(g => g.Key, g => g.OrderBy(i => i.DistanceMm).ToList());
 
-            foreach (InputLane lane in Enum.GetValues(typeof(InputLane)))
+            foreach (var lane in Enum.GetValues<InputLane>())
             {
-                var list = new List<string> { "Reaction Time" };
-                var inputsForLane = inputsByLane.ContainsKey(lane) ? inputsByLane[lane] : new List<DownTrackInput>();
+                var list = new List<TimingLabelItem> { new TimingLabelItem { Label = "Reaction Time", Value = string.Empty, IsBold = false } };
+                var inputsForLane = inputsByLane.TryGetValue(lane, out List<DownTrackInput>? value) ? value : new List<DownTrackInput>();
 
                 var remainingTrapEnds = new HashSet<int>(trapEnds);
 
                 foreach (var inp in inputsForLane)
                 {
-                    var etLabel = FormatDistanceLabel(inp.DistanceMm, distanceUnit);
-                    list.Add(etLabel);
+                    // If a finish line is specified and this input exceeds it, skip remaining inputs
+                    if (finishLineMm > 0 && inp.DistanceMm > finishLineMm)
+                        break;
 
-                    if (remainingTrapEnds.Contains(inp.DistanceMm))
-                    {
-                        var trapLabel = FormatSpeedTrapLabel(inp.DistanceMm, distanceUnit, speedUnit);
-                        list.Add(trapLabel);
-                        remainingTrapEnds.Remove(inp.DistanceMm);
-                    }
+                    // Check if this input is at the finish line
+                    bool isFinishLine = (finishLineMm > 0 && inp.DistanceMm == finishLineMm);
+
+                    var etLabel = FormatDistanceLabel(inp.DistanceMm, distanceUnit) + " ET";
+                    list.Add(new TimingLabelItem { Label = etLabel, Value = string.Empty, IsBold = isFinishLine });
+
+                    if (!remainingTrapEnds.Contains(inp.DistanceMm)) continue;
+                    var trapLabel = FormatSpeedTrapLabel(inp.DistanceMm, distanceUnit, speedUnit);
+                    list.Add(new TimingLabelItem { Label = trapLabel, Value = string.Empty, IsBold = isFinishLine });
+                    remainingTrapEnds.Remove(inp.DistanceMm);
                 }
 
-                list.Add("Result");
+                list.Add(new TimingLabelItem { Label = "Result", Value = string.Empty, IsBold = false });
                 result[lane] = list;
             }
 

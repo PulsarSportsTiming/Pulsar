@@ -19,8 +19,17 @@ namespace PulsarUI.Services
         public event Action<string, string>? TestMessageReceived;
         public event Action<long>? RunStartReceived;
         // Event raised when a reaction time is computed by RunManager.
-        // Parameters: lane ("left"/"right"), reactionTimeNanoseconds, runId, detectionSource
-        public event Action<string, long, Guid, string>? ReactionTimeComputed;
+        // Parameters: lane ("left"/"right"), reactionTimeNanoseconds, runId, detectionSource, detectionTimestampNanoseconds
+        public event Action<string, long, Guid, string, long>? ReactionTimeComputed;
+        // Event raised when an incremental time (downtrack) is computed.
+        // Parameters: lane ("left"/"right"), downtrackTimestampNanoseconds, incrementalNanoseconds, speedMetersPerSecond (nullable), runId, DownTrackInput
+        public event Action<string, long, long, decimal?, Guid, DownTrackInput>? IncrementalTimeComputed;
+        // Event raised when a lane's NoVehicle flag is updated via startline/runstart payload
+        // Parameters: lane ("left"/"right"), noVehicle (bool)
+        public event Action<string, bool>? LaneNoVehicleChanged;
+        // Event raised when a lane's DS foul flag is updated via startline/runstart payload
+        // Parameters: lane ("left"/"right"), dsFoul (bool)
+        public event Action<string, bool>? LaneDsFoulChanged;
 
         // Simple diagnostic log helper (append-only)
         private static void AppendLog(string msg)
@@ -60,6 +69,23 @@ namespace PulsarUI.Services
             public List<(long ts, bool dir)> GuardB { get; } = new();
             public long? StageRise { get; set; }
             public Guid LastPublishedRunId { get; set; } = Guid.Empty;
+            // Store the detection timestamp (the raw event timestamp used to compute reaction time)
+            public long? DetectionTimestampNs { get; set; }
+            // Store the last downtrack event for speed delta computations (per-run)
+            public int? LastDowntrackDistanceMm { get; set; }
+            public long? LastDowntrackTimestampNs { get; set; }
+            // Map trap key (startMm) -> timestamp Ns seen for this run
+            public Dictionary<int,long> TrapStartTimestamps { get; } = new();
+            public Dictionary<int,long> TrapEndTimestamps { get; } = new();
+            // Track which downtrack inputs (device:inputIndex) have already reported a timestamp for the current run.
+            // This lets us ignore repeated timestamps from the same physical input until the next run.
+            public HashSet<string> SeenDowntrackInputs { get; } = new(StringComparer.Ordinal);
+            // If true, this lane currently has no vehicle present and should not record RT or downtrack data
+            public bool NoVehicle { get; set; }
+            // If true, this lane has a DS foul (from startline/runstart) and should be remarked
+            public bool DsFoul { get; set; }
+            // If true, lane is marked foul (from startline/runstart) — tracked for completeness
+            public bool Foul { get; set; }
         }
 
         private readonly Dictionary<string, LaneBuffer> _laneBuffers = new(); // key "left" or "right"
@@ -249,9 +275,9 @@ namespace PulsarUI.Services
 
             // Attempt to lookup a configured downtrack input to include distance and lane in the test payload
             string extra = string.Empty;
+            DownTrackInput? dti = null;
             try
             {
-                DownTrackInput? dti = null;
                 if (_inputMapService != null)
                 {
                     dti = _inputMapService.TryFindDownTrackInput(timestampModel.SenderIp, timestampModel.Input);
@@ -270,7 +296,216 @@ namespace PulsarUI.Services
             {
                 AppendLog("FindDownTrackInput lookup failed: " + ex.Message);
             }
-            
+
+            // If this timestamp matches a configured DownTrackInput and we have a recorded detection timestamp for that lane,
+            // compute an incremental time and publish it and raise an event for the UI.
+            // NOTE: only use downtrack timestamps with direction == true (rising edge) per configuration.
+            try
+            {
+                if (dti != null && timestampModel.Direction)
+                {
+                    var lane = dti.Lane.ToString().ToLowerInvariant();
+                    var buf = GetBufferForLane(lane);
+                    // If lane is marked as having no vehicle, ignore any downtrack timestamps
+                    if (buf.NoVehicle)
+                    {
+                        AppendLog($"Incremental: ignoring downtrack timestamp from {(dti.Id?.Device ?? string.Empty)}:{dti.Id.InputIndex} lane={lane} ts={timestampModel.TimestampNanoseconds} (NoVehicle=true)");
+                        return Task.CompletedTask;
+                    }
+                    // If we haven't computed & published a reaction time for this lane/run yet, ignore downtrack timestamps.
+                    // Do NOT record them in SeenDowntrackInputs; they should be ignored until after RT is computed.
+                    if (!buf.DetectionTimestampNs.HasValue || buf.LastPublishedRunId == Guid.Empty)
+                    {
+                        AppendLog($"Incremental: ignoring downtrack timestamp from {(dti.Id?.Device ?? string.Empty)}:{dti.Id.InputIndex} lane={lane} ts={timestampModel.TimestampNanoseconds} (no detection timestamp yet)");
+                        return Task.CompletedTask;
+                    }
+
+                    // Now that we have a detection timestamp (reaction time published), ignore repeated timestamps from the same downtrack input
+                    // for this run — only the first timestamp per physical input is processed.
+                    try
+                    {
+                        var inputKey = (dti.Id?.Device ?? string.Empty) + ":" + dti.Id.InputIndex;
+                        lock (buf)
+                        {
+                            if (buf.SeenDowntrackInputs.Contains(inputKey))
+                            {
+                                AppendLog($"Incremental: ignoring repeated timestamp from {inputKey} lane={lane} ts={timestampModel.TimestampNanoseconds}");
+                                return Task.CompletedTask;
+                            }
+                            else
+                            {
+                                buf.SeenDowntrackInputs.Add(inputKey);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendLog("Incremental: failed checking/recording seen downtrack input: " + ex.Message);
+                    }
+
+                    if (buf.DetectionTimestampNs.HasValue && buf.LastPublishedRunId != Guid.Empty)
+                     {
+                         var runId = buf.LastPublishedRunId;
+                         var incNs = Math.Max(0, timestampModel.TimestampNanoseconds - buf.DetectionTimestampNs.Value);
+                         // Compute speed (m/s) if possible — only using configured SpeedTraps (no absolute-from-start speeds)
+                         decimal? speedMps = null;
+                         try
+                         {
+                             if (dti != null)
+                             {
+                                // Check if this distance corresponds to a configured SpeedTrap start or end
+                                var st = _inputMapService?.FindSpeedTrapByDistance(dti.DistanceMm);
+                                if (st == null)
+                                {
+                                    // Fallback: scan list and try to find a trap with Start or End equal to distance
+                                    try
+                                    {
+                                        var all = _inputMapService?.GetSpeedTraps();
+                                        if (all != null)
+                                        {
+                                            st = all.FirstOrDefault(x => x != null && (x.StartMm == dti.DistanceMm || x.EndMm == dti.DistanceMm));
+                                            AppendLog($"Incremental: FindSpeedTrapByDistance returned null; fallback scan found={(st != null)} for distance {dti.DistanceMm}");
+                                            if (st != null) AppendLog($"Incremental: fallback matched SpeedTrap Start={st.StartMm} End={st.EndMm}");
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        AppendLog("Incremental: fallback scan for traps failed: " + ex.Message);
+                                    }
+                                }
+
+                                AppendLog($"Incremental: lane={lane} distance={dti.DistanceMm} ts={timestampModel.TimestampNanoseconds} runIdCandidate={buf.LastPublishedRunId}");
+
+                                if (st != null)
+                                {
+                                    AppendLog($"Incremental: matched SpeedTrap Start={st.StartMm} End={st.EndMm}");
+
+                                    // If this distance matches the Start, record the timestamp under Start[StartMm]
+                                    if (st.StartMm == dti.DistanceMm)
+                                    {
+                                        buf.TrapStartTimestamps[st.StartMm] = timestampModel.TimestampNanoseconds;
+                                        AppendLog($"Incremental: recorded TrapStartTimestamps[{st.StartMm}] = {timestampModel.TimestampNanoseconds}");
+                                    }
+
+                                    // If it matches the End, record under End[StartMm]
+                                    if (st.EndMm == dti.DistanceMm)
+                                    {
+                                        buf.TrapEndTimestamps[st.StartMm] = timestampModel.TimestampNanoseconds;
+                                        AppendLog($"Incremental: recorded TrapEndTimestamps[{st.StartMm}] = {timestampModel.TimestampNanoseconds}");
+                                    }
+
+                                    // If we have both timestamps for this trap for this run, compute speed from delta
+                                    if (buf.TrapStartTimestamps.TryGetValue(st.StartMm, out var tStart) && buf.TrapEndTimestamps.TryGetValue(st.StartMm, out var tEnd))
+                                    {
+                                        AppendLog($"Incremental: have both trap timestamps for start={st.StartMm}: tStart={tStart} tEnd={tEnd}");
+                                        var deltaDistanceMm = st.EndMm - st.StartMm;
+                                        var deltaTimeNs = Math.Max(0, tEnd - tStart);
+                                        AppendLog($"Incremental: deltaDistanceMm={deltaDistanceMm} deltaTimeNs={deltaTimeNs}");
+                                        if (deltaDistanceMm > 0 && deltaTimeNs > 0)
+                                        {
+                                            var distanceMeters = deltaDistanceMm / 1000m;
+                                            var timeSeconds = deltaTimeNs / 1_000_000_000m;
+                                            speedMps = distanceMeters / timeSeconds;
+                                            AppendLog($"Incremental: computed speed_mps={speedMps} (m/s) for trap {st.StartMm}->{st.EndMm}");
+
+                                            // Clear stored trap timestamps for this start so we only compute once per pair
+                                            try
+                                            {
+                                                buf.TrapStartTimestamps.Remove(st.StartMm);
+                                                buf.TrapEndTimestamps.Remove(st.StartMm);
+                                                AppendLog($"Incremental: cleared TrapStart/End timestamps for start={st.StartMm}");
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                AppendLog($"Incremental: failed to clear trap timestamps for start={st.StartMm}: {ex.Message}");
+                                            }
+                                        }
+                                        else
+                                        {
+                                            AppendLog($"Incremental: missing trap side for start={st.StartMm}: hasStart={buf.TrapStartTimestamps.ContainsKey(st.StartMm)} hasEnd={buf.TrapEndTimestamps.ContainsKey(st.StartMm)} deltaDistanceMm={deltaDistanceMm} deltaTimeNs={deltaTimeNs}");
+                                            speedMps = null;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // We don't have both sides yet; leave speedMps null and wait for the other side
+                                        AppendLog($"Incremental: waiting for both trap timestamps for start={st.StartMm}");
+                                        speedMps = null;
+                                    }
+                                }
+                                else
+                                {
+                                    // No SpeedTrap configured for this distance; do not compute/publish speed
+                                    AppendLog($"Incremental: no SpeedTrap configured for distance {dti.DistanceMm}");
+                                    try
+                                    {
+                                        var allTraps = _inputMapService?.GetSpeedTraps();
+                                        AppendLog($"Incremental: configured SpeedTraps count={allTraps?.Count ?? 0}");
+                                        if (allTraps != null)
+                                        {
+                                            foreach (var tt in allTraps)
+                                            {
+                                                AppendLog($"Incremental: trap raw Id.Start={tt.Id?.Start} Id.End={tt.Id?.End} StartMm={tt.StartMm} EndMm={tt.EndMm}");
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        AppendLog("Incremental: failed to enumerate SpeedTraps: " + ex.Message);
+                                    }
+                                    speedMps = null;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLog("Speed compute (trap-based) failed: " + ex.Message);
+                            speedMps = null;
+                        }
+
+                        // Fallback disabled: only compute speeds using configured SpeedTraps
+                        try
+                        {
+                            AppendLog("Incremental: fallback disabled; only computing speeds using configured SpeedTraps");
+                        }
+                        catch { }
+
+                        // Always update trap markers only; last-downtrack fallback removed
+                        try
+                        {
+                            // No-op: preserve trap timestamp collections; last-downtrack markers are intentionally not used
+                        }
+                        catch { }
+
+                        // Publish incremental time JSON to timingdata/{lane}/incrementaltime (including speed if available)
+                        try
+                        {
+                            var incPayload = JsonSerializer.Serialize(new { incrementalNanoseconds = incNs, speedMetersPerSecond = speedMps, runId = runId.ToString(), distanceMm = dti.DistanceMm, inputIndex = dti.Id.InputIndex });
+                            _ = PublishMqtt($"timingdata/{lane}/incrementaltime", incPayload);
+                            AppendLog($"Published incremental for lane={lane} inc_ns={incNs} speed_mps={speedMps} runId={runId} distanceMm={dti.DistanceMm}");
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLog("Publish incremental failed: " + ex.Message);
+                        }
+
+                        // Raise an event so ViewModel can update the Run model and UI
+                        try
+                        {
+                            IncrementalTimeComputed?.Invoke(lane, timestampModel.TimestampNanoseconds, incNs, speedMps, runId, dti);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLog("IncrementalTimeComputed handler threw: " + ex.Message);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("Compute/publish incremental failed: " + ex.Message);
+            }
+
             try
             {
                 if (_inputMapService != null)
@@ -317,6 +552,19 @@ namespace PulsarUI.Services
                                          lock (_laneBuffers)
                                          {
                                              foreach (var b in _laneBuffers.Values) b.LastPublishedRunId = Guid.Empty;
+                                         }
+                                         
+                                         // Also reset last-downtrack info so speed deltas start fresh for the new run
+                                         lock (_laneBuffers)
+                                         {
+                                             foreach (var b in _laneBuffers.Values)
+                                             {
+                                                 b.LastDowntrackDistanceMm = null;
+                                                 b.LastDowntrackTimestampNs = null;
+                                                 b.TrapStartTimestamps.Clear();
+                                                 b.TrapEndTimestamps.Clear();
+                                                 b.SeenDowntrackInputs.Clear();
+                                             }
                                          }
                                      }
                                  }
@@ -421,26 +669,36 @@ namespace PulsarUI.Services
                                                     sRise = b.StageRise;
                                                 }
 
-                                                if (_runManager != null && _runManager.TryComputeReactionTime(_currentRunDevice, _currentRunInput.Value, sRise, aCopy, bCopy, guardAEnabled, guardBEnabled, out rtNs, out runId, out var detectionSource))
+                                                if (_runManager != null && _runManager.TryComputeReactionTime(_currentRunDevice, _currentRunInput.Value, sRise, aCopy, bCopy, guardAEnabled, guardBEnabled, out rtNs, out runId, out var detectionSource, out var detectionTimestampNs))
                                                 {
                                                     // Publish once per run per lane
                                                     var laneBuf = GetBufferForLane(lane);
-                                                    if (laneBuf.LastPublishedRunId != runId)
+                                                    // If NoVehicle is set for this lane, do not record or publish reaction times
+                                                    if (laneBuf.NoVehicle)
                                                     {
-                                                        laneBuf.LastPublishedRunId = runId;
-                                                        _ = PublishReactionTimeAsync(lane, rtNs, runId, detectionSource);
-                                                        AppendLog($"Published reaction time for lane={lane} rt_ns={rtNs} runId={runId} source={detectionSource}");
-                                                        // Notify subscribers (e.g., ViewModel) so they can attach ReactionTime to the Run model
-                                                        try
+                                                        AppendLog($"RT suppressed for lane={lane} because NoVehicle=true");
+                                                    }
+                                                    else
+                                                    {
+                                                        if (laneBuf.LastPublishedRunId != runId)
                                                         {
-                                                            ReactionTimeComputed?.Invoke(lane, rtNs, runId, detectionSource);
-                                                        }
-                                                        catch (Exception ex)
-                                                        {
-                                                            AppendLog("ReactionTimeComputed handler threw: " + ex.Message);
+                                                            laneBuf.LastPublishedRunId = runId;
+                                                            _ = PublishReactionTimeAsync(lane, rtNs, runId, detectionSource);
+                                                            AppendLog($"Published reaction time for lane={lane} rt_ns={rtNs} runId={runId} source={detectionSource}");
+                                                            // Store detection timestamp so later down-track timestamps can compute incremental times
+                                                            laneBuf.DetectionTimestampNs = detectionTimestampNs;
+                                                            // Notify subscribers (e.g., ViewModel) so they can attach ReactionTime to the Run model
+                                                            try
+                                                            {
+                                                                ReactionTimeComputed?.Invoke(lane, rtNs, runId, detectionSource, detectionTimestampNs);
+                                                            }
+                                                            catch (Exception ex)
+                                                            {
+                                                                AppendLog("ReactionTimeComputed handler threw: " + ex.Message);
+                                                            }
                                                         }
                                                     }
-                                                }
+                                                 }
                                                 else if (_runManager == null)
                                                 {
                                                     AppendLog("RunManager not attached; cannot compute reaction time");
@@ -569,6 +827,24 @@ namespace PulsarUI.Services
                 _inputMapService.TryGetIdentifier(InputRole.RightGuardB, out _rightGuardBId);
             }
             catch (Exception ex) { AppendLog("AttachInputMapService cache identifiers failed: " + ex.Message); }
+            
+            // Emit configured SpeedTraps for diagnostics
+            try
+            {
+                var traps = _inputMapService?.GetSpeedTraps();
+                AppendLog($"AttachInputMapService: SpeedTraps count={traps?.Count ?? 0}");
+                if (traps != null)
+                {
+                    foreach (var t in traps)
+                    {
+                        AppendLog($"SpeedTrap: Start={t.StartMm} End={t.EndMm}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("AttachInputMapService: failed to enumerate SpeedTraps: " + ex.Message);
+            }
         }
 
         /// <summary>
@@ -651,6 +927,7 @@ namespace PulsarUI.Services
                     "system/testmessage", 
                     "inputs/status", 
                     "inputs/timestamps", 
+                    "startline/runstart", 
                     "apibridge/competitors", 
                     "apibridge/bumpspot", 
                     "apibridge/categories", 
@@ -795,6 +1072,7 @@ namespace PulsarUI.Services
         {
             _topicHandlers["inputs/status"] = HandleInputsStatusAsync;
             _topicHandlers["inputs/timestamps"] = HandleInputTimestampsAsync;
+            _topicHandlers["startline/runstart"] = HandleStartLineRunStartAsync;
             _topicHandlers["apibridge/competitors"] = HandleApiCompetitorsAsync;
             _topicHandlers["apibridge/bumpspot"] = HandleApiBumpSpotAsync;
             _topicHandlers["apibridge/categories"] = HandleApiCategoriesAsync;
@@ -837,7 +1115,87 @@ namespace PulsarUI.Services
             return Task.CompletedTask;
         }
 
-        
+        private Task HandleStartLineRunStartAsync(string payload)
+        {
+            AppendLog($"HandleStartLineRunStartAsync: {payload}");
+            if (string.IsNullOrWhiteSpace(payload)) return Task.CompletedTask;
+            try
+            {
+                using var doc = JsonDocument.Parse(payload);
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object) return Task.CompletedTask;
+
+                // Lanes array expected
+                if (root.TryGetProperty("Lanes", out var lanesEl) && lanesEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var laneEl in lanesEl.EnumerateArray())
+                    {
+                        int laneIndex = -1;
+                        bool noVehicle = false;
+                        bool dsFoul = false;
+                        bool foul = false;
+                        try
+                        {
+                            if (laneEl.TryGetProperty("Lane", out var l) && l.ValueKind == JsonValueKind.Number && l.TryGetInt32(out var li)) laneIndex = li;
+                            if (laneEl.TryGetProperty("NoVehicle", out var nv) && nv.ValueKind == JsonValueKind.True) noVehicle = true;
+                            if (laneEl.TryGetProperty("DSFoul", out var ds) && ds.ValueKind == JsonValueKind.True) dsFoul = true;
+                            if (laneEl.TryGetProperty("Foul", out var fv) && fv.ValueKind == JsonValueKind.True) foul = true;
+                        }
+                        catch { }
+
+                        string laneKey = laneIndex == 0 ? "left" : laneIndex == 1 ? "right" : null;
+                        if (laneKey == null)
+                        {
+                            AppendLog($"HandleStartLineRunStartAsync: unknown lane index {laneIndex}, skipping");
+                            continue;
+                        }
+
+                        var buf = GetBufferForLane(laneKey);
+                        lock (buf)
+                        {
+                            buf.NoVehicle = noVehicle;
+                            buf.DsFoul = dsFoul;
+                            buf.Foul = foul;
+                            if (noVehicle)
+                            {
+                                // Clear any detection/published markers so nothing is recorded for this lane
+                                buf.LastPublishedRunId = Guid.Empty;
+                                buf.DetectionTimestampNs = null;
+                                buf.TrapStartTimestamps.Clear();
+                                buf.TrapEndTimestamps.Clear();
+                                buf.SeenDowntrackInputs.Clear();
+                                buf.LastDowntrackDistanceMm = null;
+                                buf.LastDowntrackTimestampNs = null;
+                                // Also clear buffered guard/stage events
+                                buf.GuardA.Clear();
+                                buf.GuardB.Clear();
+                                buf.StageRise = null;
+                                AppendLog($"HandleStartLineRunStartAsync: lane={laneKey} set NoVehicle=true — cleared buffers");
+                            }
+                            else
+                            {
+                                AppendLog($"HandleStartLineRunStartAsync: lane={laneKey} set NoVehicle=false");
+                            }
+                        }
+                        // Notify subscribers (ViewModel) that DSFoul has changed for this lane
+                        try
+                        {
+                            LaneDsFoulChanged?.Invoke(laneKey, dsFoul);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLog("LaneDsFoulChanged handler threw: " + ex.Message);
+                        }
+                        // (No separate event for Foul here; Foul remark is generated from RT negativity)
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("HandleStartLineRunStartAsync parse error: " + ex.Message);
+            }
+            return Task.CompletedTask;
+        }
 
         /// <summary>
         /// Publish a message to MQTT broker.

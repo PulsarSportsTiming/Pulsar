@@ -1,8 +1,13 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+using PulsarUI.Services;
+
 namespace PulsarUI.Models;
 
-public class FinishLine
+public partial class FinishLine : ObservableObject
 {
-    public int Id { get; set; }
-    public int TimingPointId { get; set; }
-    public string? Description { get; set; }
+    [ObservableProperty] private int _id;
+    [ObservableProperty] private int _distance;
+    public string DistanceString => GetDistanceString();
+    
+    private string GetDistanceString() => TimingLabelHelpers.FormatDistanceLabel(Distance,AppSettings.DistanceUnit);
 }

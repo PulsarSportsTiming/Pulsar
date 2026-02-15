@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -39,13 +40,27 @@ namespace PulsarUI.Services
             try
             {
                 var exists = File.Exists(_path);
-                File.AppendAllText("/tmp/pulsarui_config.log", DateTime.Now.ToString("o") + " InputMapService ctor: path='" + _path + "' exists=" + exists + "\n");
+                LocalAppendLog($"InputMapService ctor: path='{_path}' exists={exists}");
                 try
                 {
                     var count = _config?.DownTrackInputs?.Count ?? 0;
-                    File.AppendAllText("/tmp/pulsarui_config.log", DateTime.Now.ToString("o") + " InputMapService ctor: DownTrackInputs count=" + count + "\n");
+                    LocalAppendLog($"InputMapService ctor: DownTrackInputs count={count}");
                 }
                 catch { }
+            }
+            catch { }
+        }
+
+        // Local append-only logger that writes to /tmp/pulsarui_config.log only when the environment variable PULSAR_LOCAL_LOG=1
+        private static void LocalAppendLog(string msg)
+        {
+            try
+            {
+                var toggle = Environment.GetEnvironmentVariable("PULSAR_LOCAL_LOG");
+                if (string.Equals(toggle, "1"))
+                {
+                    File.AppendAllText("/tmp/pulsarui_config.log", DateTime.Now.ToString("o") + " " + msg + "\n");
+                }
             }
             catch { }
         }
@@ -56,17 +71,17 @@ namespace PulsarUI.Services
             {
                 if (!File.Exists(path))
                 {
-                    try { File.AppendAllText("/tmp/pulsarui_config.log", DateTime.Now.ToString("o") + " InputMapService.Load: file does not exist at path='" + path + "'\n"); } catch { }
+                    LocalAppendLog($"InputMapService.Load: file does not exist at path='{path}'");
                     return new InputConfiguration();
                 }
 
                 var json = File.ReadAllText(path);
-                try { File.AppendAllText("/tmp/pulsarui_config.log", DateTime.Now.ToString("o") + " InputMapService.Load: read " + json.Length + " bytes from '" + path + "'\n"); } catch { }
+                LocalAppendLog($"InputMapService.Load: read {json.Length} bytes from '{path}'");
                 return InputConfiguration.LoadFromJson(json);
             }
             catch (Exception ex)
             {
-                try { File.AppendAllText("/tmp/pulsarui_config.log", DateTime.Now.ToString("o") + " InputMapService.Load: exception reading '" + path + "': " + ex.Message + "\n"); } catch { }
+                LocalAppendLog($"InputMapService.Load: exception reading '{path}': {ex.Message}");
                 return new InputConfiguration();
             }
         }
@@ -152,7 +167,7 @@ namespace PulsarUI.Services
                     {
                         sbAll.AppendLine("  cfg: '" + (dd?.Id?.Device ?? "<null>") + "' -> norm='" + Normalize(dd?.Id?.Device) + "' idx=" + dd?.Id?.InputIndex);
                     }
-                    System.IO.File.AppendAllText("/tmp/pulsar_mqtt.log", sbAll.ToString());
+                    LocalAppendLog(sbAll.ToString());
                 }
                 catch { }
                 var candidates = _config.DownTrackInputs
@@ -178,7 +193,7 @@ namespace PulsarUI.Services
                     {
                         sbList.AppendLine($"  cfg='{d.Id.Device}' -> norm='{Normalize(d.Id.Device)}' idx={d.Id.InputIndex}");
                     }
-                    System.IO.File.AppendAllText("/tmp/pulsar_mqtt.log", sbList.ToString());
+                    LocalAppendLog(sbList.ToString());
                 }
                 catch { }
 
@@ -198,7 +213,7 @@ namespace PulsarUI.Services
                         var after = _config.DownTrackInputs?.Count ?? 0;
                         var sbR = new System.Text.StringBuilder();
                         sbR.AppendLine(DateTime.Now.ToString("o") + " InputMapService: Reload attempted in TryFindDownTrackInput; _path='" + _path + "' existed=" + fileExists + " beforeCount=" + before + " afterCount=" + after);
-                        System.IO.File.AppendAllText("/tmp/pulsar_mqtt.log", sbR.ToString());
+                        LocalAppendLog(sbR.ToString());
                         // Recompute candidates from reloaded config
                         candidates = _config.DownTrackInputs
                             .Where(d => d != null && d.Id != null)
@@ -209,7 +224,7 @@ namespace PulsarUI.Services
                     }
                     catch (Exception ex)
                     {
-                        try { System.IO.File.AppendAllText("/tmp/pulsar_mqtt.log", DateTime.Now.ToString("o") + " InputMapService: reload in TryFindDownTrackInput failed: " + ex.Message + "\n"); } catch { }
+                        LocalAppendLog($"InputMapService: reload in TryFindDownTrackInput failed: {ex.Message}");
                     }
                 }
 
@@ -223,7 +238,7 @@ namespace PulsarUI.Services
                     {
                         sb.AppendLine($"  candidate Device='{c.Id.Device}' InputIndex={c.Id.InputIndex} DistanceMm={c.DistanceMm} Lane={(int)c.Lane}");
                     }
-                    System.IO.File.AppendAllText("/tmp/pulsar_mqtt.log", sb.ToString());
+                    LocalAppendLog(sb.ToString());
                 }
                 catch { }
 
@@ -237,10 +252,28 @@ namespace PulsarUI.Services
                     var sb2 = new System.Text.StringBuilder();
                     sb2.AppendLine(DateTime.Now.ToString("o") + " InputMapService.TryFindDownTrackInput: no exact input match among candidates for device='" + device + "' inputIndex=" + inputIndex);
                     sb2.AppendLine("  Candidates:\n" + string.Join("\n", candidates.Select(c => $"    {c.Id.Device}:{c.Id.InputIndex}")));
-                    System.IO.File.AppendAllText("/tmp/pulsar_mqtt.log", sb2.ToString());
+                    LocalAppendLog(sb2.ToString());
                 }
                 catch { }
                 return null;
+            }
+            finally { _lock.ExitReadLock(); }
+        }
+
+        public List<SpeedTrap> GetSpeedTraps()
+        {
+            _lock.EnterReadLock();
+            try { return _config.SpeedTraps ?? new List<SpeedTrap>(); }
+            finally { _lock.ExitReadLock(); }
+        }
+
+        // Find a SpeedTrap that has either Start or End equal to the provided distance (mm)
+        public SpeedTrap? FindSpeedTrapByDistance(int distanceMm)
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                return _config.SpeedTraps?.FirstOrDefault(st => st != null && (st.StartMm == distanceMm || st.EndMm == distanceMm));
             }
             finally { _lock.ExitReadLock(); }
         }
