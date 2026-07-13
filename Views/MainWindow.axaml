@@ -490,7 +490,7 @@
                     <Label Classes="FKeyText" Content="Queue" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="5" x:Name="F6Button" Classes="FKey" HotKey="F6" IsEnabled="{Binding SystemEngaged}">
+            <Button Grid.Column="5" x:Name="F6Button" Classes="FKey" HotKey="F6" Command="{Binding StartRunCommand}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F6" />
                     <Label Classes="FKeyText" Content="Start" />
@@ -502,7 +502,7 @@
                     <Label Classes="FKeyText" Content="Setup" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="7" x:Name="F8Button" Classes="FKey" HotKey="F8" IsEnabled="{Binding RunActive}">
+            <Button Grid.Column="7" x:Name="F8Button" Classes="FKey" HotKey="F8" Command="{Binding AbortRunCommand}" IsEnabled="{Binding RunActive}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F8" />
                     <Label Classes="FKeyText" Content="Abort" />

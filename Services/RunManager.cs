@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 
 namespace PulsarUI.Services
 {
@@ -54,14 +55,14 @@ namespace PulsarUI.Services
 
         // Public API: compute reaction time for an active run identified by device+input.
         // Parameters:
-        // - stageFallTimestampNs: nullable timestamp of a stage FALL event (direction == false). If null, treated as not observed.
-        // - guardAEvents / guardBEvents: ordered (or unordered) lists of (timestampNs, direction) events for each guard. direction==true indicates rise (high).
+        // - stageStartTimestampNs: nullable timestamp of a stage START (beam remade, direction == true). If null, treated as not observed.
+        // - guardAEvents / guardBEvents: ordered (or unordered) lists of (timestampNs, direction) events for each guard. direction==true indicates rise (remade/high), direction==false indicates fall (blocked/low).
         // - guardAEnabled / guardBEnabled: whether each guard is enabled in the race config.
-        // Returns true and sets reactionTimeNanoseconds when a reaction time can be determined (either stage fall or guard rise overlap), otherwise false.
+        // Returns true and sets reactionTimeNanoseconds when a reaction time can be determined (either stage start or guard blocked detection), otherwise false.
         public bool TryComputeReactionTime(
             string device,
             int input,
-            long? stageFallTimestampNs,
+            long? stageStartTimestampNs,
             IReadOnlyList<(long TimestampNanoseconds, bool Direction)>? guardAEvents,
             IReadOnlyList<(long TimestampNanoseconds, bool Direction)>? guardBEvents,
             bool guardAEnabled,
@@ -84,14 +85,15 @@ namespace PulsarUI.Services
             guardAEvents ??= Array.Empty<(long, bool)>();
             guardBEvents ??= Array.Empty<(long, bool)>();
 
-            // If neither guard is enabled: reaction is strictly stage FALL.
+            // If neither guard is enabled: reaction is strictly stage START (remade).
             if (!guardAEnabled && !guardBEnabled)
             {
-                if (stageFallTimestampNs.HasValue && stageFallTimestampNs.Value > runStart)
+                if (stageStartTimestampNs.HasValue && stageStartTimestampNs.Value > runStart)
                 {
-                    reactionTimeNanoseconds = Math.Max(0, stageFallTimestampNs.Value - runStart);
+                    reactionTimeNanoseconds = Math.Max(0, stageStartTimestampNs.Value - runStart);
                     detectionSource = "stage";
-                    detectionTimestampNanoseconds = stageFallTimestampNs.Value;
+                    detectionTimestampNanoseconds = stageStartTimestampNs.Value;
+                    try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTimeOffset.UtcNow.ToString("o") + $" RunManager: device={device} input={input} runStart={runStart} detection=stage detectionTs={stageStartTimestampNs.Value} rt_ns={reactionTimeNanoseconds}\n"); } catch { }
                     return true;
                 }
                 return false;
@@ -101,21 +103,21 @@ namespace PulsarUI.Services
             if (guardAEnabled ^ guardBEnabled)
             {
                 var guardEvents = guardAEnabled ? guardAEvents : guardBEvents;
-                // With inverted polarity guards are detected on rising edges
-                var earliestRise = FirstRiseAfter(guardEvents, runStart);
+                // Guards are considered blocked on FALL (direction==false). Find first fall after runStart.
+                var earliestFall = FirstFallAfter(guardEvents, runStart);
 
                 long? chosenTimestamp = null;
                 string chosenSource = "";
-                if (stageFallTimestampNs.HasValue && stageFallTimestampNs.Value > runStart)
+                if (stageStartTimestampNs.HasValue && stageStartTimestampNs.Value > runStart)
                 {
-                    chosenTimestamp = stageFallTimestampNs.Value;
+                    chosenTimestamp = stageStartTimestampNs.Value;
                     chosenSource = "stage";
                 }
-                if (earliestRise.HasValue)
+                if (earliestFall.HasValue)
                 {
-                    if (!chosenTimestamp.HasValue || earliestRise.Value < chosenTimestamp.Value)
+                    if (!chosenTimestamp.HasValue || earliestFall.Value < chosenTimestamp.Value)
                     {
-                        chosenTimestamp = earliestRise.Value;
+                        chosenTimestamp = earliestFall.Value;
                         chosenSource = guardAEnabled ? "guardA" : "guardB";
                     }
                 }
@@ -125,15 +127,16 @@ namespace PulsarUI.Services
                     reactionTimeNanoseconds = Math.Max(0, chosenTimestamp.Value - runStart);
                     detectionSource = chosenSource;
                     detectionTimestampNanoseconds = chosenTimestamp.Value;
+                    try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTimeOffset.UtcNow.ToString("o") + $" RunManager: device={device} input={input} runStart={runStart} detection={detectionSource} detectionTs={detectionTimestampNanoseconds} rt_ns={reactionTimeNanoseconds}\n"); } catch { }
                     return true;
                 }
                 return false;
             }
 
-            // Both guards enabled: need an interval where both guards are low simultaneously.
-            // Compute HIGH intervals for each guard (guards are detected on rising edges)
-            var aIntervals = ComputeHighIntervalsAfter(guardAEvents, runStart);
-            var bIntervals = ComputeHighIntervalsAfter(guardBEvents, runStart);
+            // Both guards enabled: need an interval where both guards are BLOCKED (LOW) simultaneously.
+            // Compute LOW intervals for each guard (blocked intervals), inferring pre-run state from events <= runStart.
+            var aIntervals = ComputeLowIntervalsAfter(guardAEvents, runStart);
+            var bIntervals = ComputeLowIntervalsAfter(guardBEvents, runStart);
 
             // Find the earliest overlap start among all interval pairs
             long? earliestOverlapStart = null;
@@ -152,7 +155,7 @@ namespace PulsarUI.Services
                 }
             }
 
-            // Decide between guard-overlap detection and stage rise
+            // Decide between guard-overlap detection and stage START (remade)
             long? detectionTs = null;
             string detSource = "";
             if (earliestOverlapStart.HasValue)
@@ -160,11 +163,11 @@ namespace PulsarUI.Services
                 detectionTs = earliestOverlapStart.Value;
                 detSource = "guardsOverlap";
             }
-            if (stageFallTimestampNs.HasValue && stageFallTimestampNs.Value > runStart)
+            if (stageStartTimestampNs.HasValue && stageStartTimestampNs.Value > runStart)
             {
-                if (!detectionTs.HasValue || stageFallTimestampNs.Value < detectionTs.Value)
+                if (!detectionTs.HasValue || stageStartTimestampNs.Value < detectionTs.Value)
                 {
-                    detectionTs = stageFallTimestampNs.Value;
+                    detectionTs = stageStartTimestampNs.Value;
                     detSource = "stage";
                 }
             }
@@ -174,63 +177,81 @@ namespace PulsarUI.Services
                 reactionTimeNanoseconds = Math.Max(0, detectionTs.Value - runStart);
                 detectionSource = detSource;
                 detectionTimestampNanoseconds = detectionTs.Value;
+                try { File.AppendAllText("/tmp/pulsarui_debug.log", DateTimeOffset.UtcNow.ToString("o") + $" RunManager: device={device} input={input} runStart={runStart} detection={detectionSource} detectionTs={detectionTimestampNanoseconds} rt_ns={reactionTimeNanoseconds}\n"); } catch { }
                 return true;
             }
 
             return false;
         }
 
-        // Return the first rise (direction==true) strictly after runStart, or null if none
-        private static long? FirstRiseAfter(IReadOnlyList<(long TimestampNanoseconds, bool Direction)>? events, long runStart)
+        // Return the first fall (direction==false) strictly after runStart, or null if none
+        private static long? FirstFallAfter(IReadOnlyList<(long TimestampNanoseconds, bool Direction)>? events, long runStart)
         {
             if (events == null || events.Count == 0) return null;
             foreach (var ev in events.OrderBy(e => e.TimestampNanoseconds))
             {
                 if (ev.TimestampNanoseconds <= runStart) continue;
-                if (ev.Direction) // direction==true means rise -> high
+                if (!ev.Direction) // direction==false means fall -> blocked/low
                     return ev.TimestampNanoseconds;
             }
             return null;
         }
 
-        // Compute list of HIGH intervals (start, end) for a guard, considering only events strictly after runStart.
-        // An interval end of long.MaxValue indicates the guard remains high indefinitely.
-        private static List<(long start, long end)> ComputeHighIntervalsAfter(IReadOnlyList<(long TimestampNanoseconds, bool Direction)>? events, long runStart)
+        // Compute list of LOW intervals (blocked) (start, end) for a guard, considering events before and after runStart
+        // so the guard state at runStart can be inferred. An interval end of long.MaxValue indicates the guard remains low indefinitely.
+        private static List<(long start, long end)> ComputeLowIntervalsAfter(IReadOnlyList<(long TimestampNanoseconds, bool Direction)>? events, long runStart)
         {
             var intervals = new List<(long start, long end)>();
             if (events == null || events.Count == 0) return intervals;
 
             var sorted = events.OrderBy(e => e.TimestampNanoseconds).ToList();
 
-            // We assume guard is HIGH at runStart (do not infer high/low from pre-run events).
-            long? curHighStart = runStart;
+            // Infer the guard state at runStart from the last event <= runStart if present.
+            // Direction==true => rise => HIGH/unblocked. Direction==false => fall => LOW/blocked.
+            bool isHighAtRunStart = true; // default HIGH if unknown to avoid false immediate blocked overlap
+            for (int i = sorted.Count - 1; i >= 0; i--)
+            {
+                if (sorted[i].TimestampNanoseconds <= runStart)
+                {
+                    isHighAtRunStart = sorted[i].Direction;
+                    break;
+                }
+            }
 
-            // Iterate events strictly after runStart
+            long? curLowStart = null;
+            if (!isHighAtRunStart)
+            {
+                // If guard was LOW at runStart, the low interval starts at runStart
+                curLowStart = runStart;
+            }
+
+            // Iterate events strictly after runStart to build LOW intervals.
             foreach (var ev in sorted)
             {
                 if (ev.TimestampNanoseconds <= runStart) continue;
+
                 if (!ev.Direction)
                 {
-                    // fall -> exit high if currently high
-                    if (curHighStart.HasValue)
+                    // fall -> enter LOW
+                    if (!curLowStart.HasValue)
                     {
-                        intervals.Add((curHighStart.Value, ev.TimestampNanoseconds));
-                        curHighStart = null;
+                        curLowStart = ev.TimestampNanoseconds;
                     }
                 }
                 else
                 {
-                    // rise -> enter high if not already high
-                    if (!curHighStart.HasValue)
+                    // rise -> exit LOW
+                    if (curLowStart.HasValue)
                     {
-                        curHighStart = ev.TimestampNanoseconds;
+                        intervals.Add((curLowStart.Value, ev.TimestampNanoseconds));
+                        curLowStart = null;
                     }
                 }
             }
 
-            if (curHighStart.HasValue)
+            if (curLowStart.HasValue)
             {
-                intervals.Add((curHighStart.Value, long.MaxValue));
+                intervals.Add((curLowStart.Value, long.MaxValue));
             }
 
             return intervals;

@@ -122,6 +122,31 @@ namespace PulsarUI.Services
                     var s = d.Trim();
                     if (s.Length >= 2 && ((s.StartsWith("\"") && s.EndsWith("\"")) || (s.StartsWith("'") && s.EndsWith("'"))))
                         s = s.Substring(1, s.Length - 2);
+
+                    // Strip common port suffixes so incoming sender strings like "192.168.20.22:1234" or
+                    // IPv6 forms like "[fe80::1]:1234" match configured device entries that omit a port.
+                    try
+                    {
+                        if (s.StartsWith("[") && s.Contains("]"))
+                        {
+                            var close = s.IndexOf(']');
+                            var colonAfter = s.IndexOf(':', close);
+                            if (colonAfter > close)
+                                s = s.Substring(0, colonAfter);
+                        }
+                        else
+                        {
+                            var colonCount = s.Count(c => c == ':');
+                            // For simple IPv4:port case there will be a single ':'
+                            if (colonCount == 1)
+                            {
+                                var idx = s.LastIndexOf(':');
+                                if (idx > 0) s = s.Substring(0, idx);
+                            }
+                        }
+                    }
+                    catch { /* best-effort normalization, ignore failures */ }
+
                     return s;
                 }
 

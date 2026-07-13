@@ -43,6 +43,70 @@ namespace PulsarUI.Services
             try { Console.WriteLine("MQTTLOG: " + msg); } catch { }
         }
 
+        // Helper to subscribe to the configured topics with a small retry loop.
+        private async Task SubscribeToTopicsAsync()
+        {
+            if (_mqttClient == null) throw new InvalidOperationException("MQTT client not attached");
+
+            var maxAttempts = 3;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                if (_mqttClient.IsConnected != true)
+                {
+                    AppendLog($"SubscribeToTopicsAsync: client not connected (attempt {attempt}/{maxAttempts}), waiting...");
+                    // Try to connect once more before subscribing
+                    try
+                    {
+                        if (_options != null)
+                            await _mqttClient.ConnectAsync(_options, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendLog("SubscribeToTopicsAsync: ConnectAsync during subscribe attempt failed: " + ex.Message);
+                    }
+                }
+
+                if (_mqttClient.IsConnected != true)
+                {
+                    if (attempt == maxAttempts)
+                    {
+                        throw new InvalidOperationException("MQTT client not connected after subscribe attempts");
+                    }
+                    await Task.Delay(250);
+                    continue;
+                }
+
+                var subscribeOptionsBuilder = _mqttFactory.CreateSubscribeOptionsBuilder();
+                foreach (var topic in _subscribeTopics)
+                {
+                    subscribeOptionsBuilder.WithTopicFilter(f => f.WithTopic(topic).WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce));
+                }
+
+                var subscribeOptions = subscribeOptionsBuilder.Build();
+                var subscribeResult = await _mqttClient.SubscribeAsync(subscribeOptions, CancellationToken.None);
+
+                AppendLog($"SubscribeToTopicsAsync: subscribe attempted (attempt {attempt})");
+
+                try
+                {
+                    if (subscribeResult?.Items != null)
+                    {
+                        foreach (var item in subscribeResult.Items)
+                        {
+                            AppendLog($"Subscribe result: TopicFilter={item.TopicFilter} ReasonCode={item.ResultCode}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendLog("SubscribeToTopicsAsync: failed to enumerate subscribeResult items: " + ex.Message);
+                }
+
+                // If we reach here without throwing, assume subscribe succeeded
+                return;
+            }
+        }
+
         private const string UnknownPair = "unknownpair";
 
         private IMqttClient? _mqttClient;
@@ -52,7 +116,20 @@ namespace PulsarUI.Services
         private CancellationTokenSource? _reconnectCts;
         private Task? _reconnectTask;
 
-        private readonly Dictionary<string, Func<string, Task>> _topicHandlers = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Func<string, string, Task>> _topicHandlers = new(StringComparer.OrdinalIgnoreCase);
+        // Topics the service subscribes to (centralized for reuse when reconnecting)
+        private readonly string[] _subscribeTopics = new[]
+        {
+            "system/testmessage",
+            "inputs/status",
+            "inputs/timestamps",
+            "startline/runstart",
+            "lanestart/#",
+            "apibridge/competitors",
+            "apibridge/bumpspot",
+            "apibridge/categories",
+            "apibridge/classes"
+        };
         private InputMapService? _inputMapService;
         private RunManager? _runManager;
         private InputIdentifier? _runStartIdentifier;
@@ -63,11 +140,14 @@ namespace PulsarUI.Services
         private InputIdentifier? _rightGuardAId;
         private InputIdentifier? _rightGuardBId;
         
-                private class LaneBuffer
+            private class LaneBuffer
         {
             public List<(long ts, bool dir)> GuardA { get; } = new();
             public List<(long ts, bool dir)> GuardB { get; } = new();
-            public long? StageRise { get; set; }
+            // Record all stage events (timestamp, direction) so we can find the first remade (direction==true)
+            public List<(long ts, bool dir)> StageEvents { get; } = new();
+            // When true, we are recording timestamps for a run until a lanestart source message arrives
+            public bool RecordingForLanestart { get; set; } = false;
             public Guid LastPublishedRunId { get; set; } = Guid.Empty;
             // Store the detection timestamp (the raw event timestamp used to compute reaction time)
             public long? DetectionTimestampNs { get; set; }
@@ -167,7 +247,14 @@ namespace PulsarUI.Services
         // Publishes reaction time JSON to timingdata/{lane}/reactiontime with detection source
         private Task PublishReactionTimeAsync(string lane, long reactionTimeNs, Guid runId, string detectionSource)
         {
-            var payload = JsonSerializer.Serialize(new { reactionTimeNanoseconds = reactionTimeNs, runId = runId.ToString(), detectionSource });
+            // Include a preformatted reaction time string so consumers can rely on the JSON payload only
+            var payload = JsonSerializer.Serialize(new
+            {
+                reactionTimeNanoseconds = reactionTimeNs,
+                reactionTimeString = TimingLabelHelpers.FormatTimeFromNanosecondsNumeric(reactionTimeNs),
+                runId = runId.ToString(),
+                detectionSource
+            });
             var topic = $"timingdata/{lane}/reactiontime";
             return PublishMqtt(topic, payload);
         }
@@ -480,7 +567,18 @@ namespace PulsarUI.Services
                         // Publish incremental time JSON to timingdata/{lane}/incrementaltime (including speed if available)
                         try
                         {
-                            var incPayload = JsonSerializer.Serialize(new { incrementalNanoseconds = incNs, speedMetersPerSecond = speedMps, runId = runId.ToString(), distanceMm = dti.DistanceMm, inputIndex = dti.Id.InputIndex });
+                            // Include both machine-friendly numeric values and human-friendly preformatted strings
+                            // so consumers can use the JSON payload only and avoid separate /string topics.
+                            var incPayload = JsonSerializer.Serialize(new
+                            {
+                                incrementalNanoseconds = incNs,
+                                incrementalString = TimingLabelHelpers.FormatTimeFromNanosecondsNumeric(incNs),
+                                speedMetersPerSecond = speedMps,
+                                speedString = speedMps.HasValue ? TimingLabelHelpers.FormatSpeed(speedMps.Value) : string.Empty,
+                                runId = runId.ToString(),
+                                distanceMm = dti.DistanceMm,
+                                inputIndex = dti.Id.InputIndex
+                            });
                             _ = PublishMqtt($"timingdata/{lane}/incrementaltime", incPayload);
                             AppendLog($"Published incremental for lane={lane} inc_ns={incNs} speed_mps={speedMps} runId={runId} distanceMm={dti.DistanceMm}");
                         }
@@ -526,57 +624,82 @@ namespace PulsarUI.Services
                             {
                                 try
                                 {
-                                    if (!string.IsNullOrEmpty(timestampModel.SenderIp))
+                                    // Only treat the RunStartTrigger as a run START when the input direction is a RISE (Direction==true).
+                                    // Some hardware emits both rise and fall for the same input; ignoring falls prevents later events
+                                    // from overwriting the initial run-start timestamp.
+                                    if (!timestampModel.Direction)
                                     {
-                                        if (_runManager != null)
+                                        AppendLog($"RunStartTrigger ignored (direction=fall) for {timestampModel.SenderIp}:{timestampModel.Input} ts={ts}");
+                                    }
+                                    else
+                                    {
+                                        if (!string.IsNullOrEmpty(timestampModel.SenderIp))
                                         {
-                                            if (_runManager.TryStartRun(timestampModel.SenderIp, timestampModel.Input, ts, out var newRunId, forceRestart: true))
-                                             {
-                                                 AppendLog($"RunManager: started run {newRunId} for {timestampModel.SenderIp}:{timestampModel.Input} ts={ts}");
-                                             }
-                                             else
-                                             {
-                                                 AppendLog($"RunManager: run already present for {timestampModel.SenderIp}:{timestampModel.Input}");
-                                             }
+                                            if (_runManager != null)
+                                            {
+                                                if (_runManager.TryStartRun(timestampModel.SenderIp, timestampModel.Input, ts, out var newRunId, forceRestart: true))
+                                                {
+                                                    AppendLog($"RunManager: started run {newRunId} for {timestampModel.SenderIp}:{timestampModel.Input} ts={ts}");
+                                                }
+                                                else
+                                                {
+                                                    AppendLog($"RunManager: run already present for {timestampModel.SenderIp}:{timestampModel.Input}");
+                                                }
+                                            }
+                                            else
+                                            {
+                                                AppendLog("RunStartTrigger received but no RunManager attached; skipping run registration");
+                                            }
+
+                                            // Remember current run source so later sensor events can be associated
+                                            _currentRunDevice = timestampModel.SenderIp;
+                                            _currentRunInput = timestampModel.Input;
+
+                                            // Reset per-lane published markers so we allow publishing RT for the new run
+                                            lock (_laneBuffers)
+                                            {
+                                                foreach (var b in _laneBuffers.Values) b.LastPublishedRunId = Guid.Empty;
+                                            }
+
+                                            // Also reset last-downtrack info so speed deltas start fresh for the new run
+                                            lock (_laneBuffers)
+                                            {
+                                                foreach (var b in _laneBuffers.Values)
+                                                {
+                                                    b.LastDowntrackDistanceMm = null;
+                                                    b.LastDowntrackTimestampNs = null;
+                                                    b.TrapStartTimestamps.Clear();
+                                                    b.TrapEndTimestamps.Clear();
+                                                    b.SeenDowntrackInputs.Clear();
+                                                }
+                                            }
+
+                                            // Begin recording stage/guard events for lanestart confirmation until a lanestart/source message is received
+                                            lock (_laneBuffers)
+                                            {
+                                                foreach (var b in _laneBuffers.Values)
+                                                {
+                                                    b.RecordingForLanestart = true;
+                                                    b.StageEvents.Clear();
+                                                    b.GuardA.Clear();
+                                                    b.GuardB.Clear();
+                                                }
+                                            }
                                         }
-                                        else
-                                        {
-                                            AppendLog("RunStartTrigger received but no RunManager attached; skipping run registration");
-                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    AppendLog("RunManager TryStartRun failed: " + ex.Message);
+                                }
 
-                                         // Remember current run source so later sensor events can be associated
-                                         _currentRunDevice = timestampModel.SenderIp;
-                                         _currentRunInput = timestampModel.Input;
-
-                                         // Reset per-lane published markers so we allow publishing RT for the new run
-                                         lock (_laneBuffers)
-                                         {
-                                             foreach (var b in _laneBuffers.Values) b.LastPublishedRunId = Guid.Empty;
-                                         }
-                                         
-                                         // Also reset last-downtrack info so speed deltas start fresh for the new run
-                                         lock (_laneBuffers)
-                                         {
-                                             foreach (var b in _laneBuffers.Values)
-                                             {
-                                                 b.LastDowntrackDistanceMm = null;
-                                                 b.LastDowntrackTimestampNs = null;
-                                                 b.TrapStartTimestamps.Clear();
-                                                 b.TrapEndTimestamps.Clear();
-                                                 b.SeenDowntrackInputs.Clear();
-                                             }
-                                         }
-                                     }
-                                 }
-                                 catch (Exception ex)
-                                 {
-                                     AppendLog("RunManager TryStartRun failed: " + ex.Message);
-                                 }
-
-                                // Preserve existing behavior: notify any subscribers
+                                // Notify subscribers only when this input indicates a run START (rise)
                                 try
                                 {
-                                    RunStartReceived?.Invoke(ts);
+                                    if (timestampModel.Direction)
+                                    {
+                                        RunStartReceived?.Invoke(ts);
+                                    }
                                 }
                                 catch (Exception ex)
                                 {
@@ -608,12 +731,10 @@ namespace PulsarUI.Services
                                                 buf.GuardB.Add((ts, timestampModel.Direction));
                                             }
 
-                                            // Stage rise
+                                            // Stage event: record all stage (timestamp, direction) events so we can find the first remade (direction==true)
                                             if (role == InputRole.LeftStage || role == InputRole.RightStage)
                                             {
-                                                // Inverted polarity: we treat stage FALL as the detection event
-                                                if (!timestampModel.Direction) // false == fall
-                                                    buf.StageRise = ts;
+                                                buf.StageEvents.Add((ts, timestampModel.Direction));
                                             }
                                         }
 
@@ -660,16 +781,31 @@ namespace PulsarUI.Services
                                                 long rtNs;
                                                 Guid runId;
                                                 // Copy lists under lock to avoid concurrent modification
-                                                List<(long, bool)> aCopy, bCopy; long? sRise;
-                                                var b = GetBufferForLane(lane);
-                                                lock (b)
-                                                {
-                                                    aCopy = b.GuardA.ToList();
-                                                    bCopy = b.GuardB.ToList();
-                                                    sRise = b.StageRise;
-                                                }
+                                                 List<(long ts, bool dir)> aCopy, bCopy; long? sStart;
+                                                 var b = GetBufferForLane(lane);
+                                                 lock (b)
+                                                 {
+                                                     aCopy = b.GuardA.ToList();
+                                                     bCopy = b.GuardB.ToList();
+                                                     // Determine the first stage remade (direction==true) observed in the buffer
+                                                     var firstRemade = b.StageEvents.Where(x => x.dir).OrderBy(x => x.ts).Select(x => x.ts).FirstOrDefault();
+                                                     sStart = firstRemade == 0 ? (long?)null : firstRemade;
+                                                 }
 
-                                                if (_runManager != null && _runManager.TryComputeReactionTime(_currentRunDevice, _currentRunInput.Value, sRise, aCopy, bCopy, guardAEnabled, guardBEnabled, out rtNs, out runId, out var detectionSource, out var detectionTimestampNs))
+                                                  // Diagnostic: attempt to infer stored runStart for logging by asking RunManager for elapsed at this event timestamp
+                                                  long runStartForLog = -1;
+                                                  try
+                                                  {
+                                                      if (_runManager != null && _runManager.TryGetElapsedNanoseconds(_currentRunDevice, _currentRunInput.Value, ts, out var elapsedForLog, out var ridForLog))
+                                                      {
+                                                          runStartForLog = ts - elapsedForLog;
+                                                      }
+                                                  }
+                                                  catch { }
+
+                                                  AppendLog($"TryComputeReactionTime: lane={lane} eventTs={ts} inferredRunStart={runStartForLog} sStart={(sStart.HasValue? sStart.Value.ToString():"<null>")} guardAEvents={aCopy.Count} guardBEvents={bCopy.Count} guardAEnabled={guardAEnabled} guardBEnabled={guardBEnabled}");
+
+                                                  if (_runManager != null && _runManager.TryComputeReactionTime(_currentRunDevice, _currentRunInput.Value, sStart, aCopy, bCopy, guardAEnabled, guardBEnabled, out rtNs, out runId, out var detectionSource, out var detectionTimestampNs))
                                                 {
                                                     // Publish once per run per lane
                                                     var laneBuf = GetBufferForLane(lane);
@@ -680,23 +816,25 @@ namespace PulsarUI.Services
                                                     }
                                                     else
                                                     {
-                                                        if (laneBuf.LastPublishedRunId != runId)
-                                                        {
-                                                            laneBuf.LastPublishedRunId = runId;
-                                                            _ = PublishReactionTimeAsync(lane, rtNs, runId, detectionSource);
-                                                            AppendLog($"Published reaction time for lane={lane} rt_ns={rtNs} runId={runId} source={detectionSource}");
-                                                            // Store detection timestamp so later down-track timestamps can compute incremental times
-                                                            laneBuf.DetectionTimestampNs = detectionTimestampNs;
-                                                            // Notify subscribers (e.g., ViewModel) so they can attach ReactionTime to the Run model
-                                                            try
+                                                            if (laneBuf.LastPublishedRunId != runId)
                                                             {
-                                                                ReactionTimeComputed?.Invoke(lane, rtNs, runId, detectionSource, detectionTimestampNs);
+                                                                laneBuf.LastPublishedRunId = runId;
+                                                                // Do NOT publish MQTT here. The ViewModel subscribes to ReactionTimeComputed,
+                                                                // populates ExpectedReactionTimeNs and will publish timingdata/{lane}/reactiontime
+                                                                // so the reactionTimeString matches the on-screen value.
+                                                                AppendLog($"Computed reaction time for lane={lane} rt_ns={rtNs} runId={runId} source={detectionSource} (publish deferred to ViewModel)");
+                                                                // Store detection timestamp so later down-track timestamps can compute incremental times
+                                                                laneBuf.DetectionTimestampNs = detectionTimestampNs;
+                                                                // Notify subscribers (e.g., ViewModel) so they can attach ReactionTime to the Run model
+                                                                try
+                                                                {
+                                                                    ReactionTimeComputed?.Invoke(lane, rtNs, runId, detectionSource, detectionTimestampNs);
+                                                                }
+                                                                catch (Exception ex)
+                                                                {
+                                                                    AppendLog("ReactionTimeComputed handler threw: " + ex.Message);
+                                                                }
                                                             }
-                                                            catch (Exception ex)
-                                                            {
-                                                                AppendLog("ReactionTimeComputed handler threw: " + ex.Message);
-                                                            }
-                                                        }
                                                     }
                                                  }
                                                 else if (_runManager == null)
@@ -878,17 +1016,40 @@ namespace PulsarUI.Services
                 _mqttClient = _mqttFactory.CreateMqttClient();
 
                 // Build options using builder pattern (like samples)
+                // Ensure a reasonably unique client id so multiple instances or reconnects don't
+                // cause the broker to drop an existing session immediately.
+                var uniqueClientId = clientId + "-" + Guid.NewGuid().ToString("N");
+
                 _options = new MqttClientOptionsBuilder()
                     .WithTcpServer(host, port)
-                    .WithClientId(clientId)
+                    .WithClientId(uniqueClientId)
                     .WithCleanSession()
-                    .WithProtocolVersion(MqttProtocolVersion.V500)
+                        // Prefer MQTT v3.1.1 for broader broker compatibility; v5 is supported but some brokers
+                        // may interoperate better when using v3.1.1. Change to V500 if you need v5 features.
+                        .WithProtocolVersion(MqttProtocolVersion.V311)
                     .Build();
 
                 AppendLog($"AttachMqttClientFromHost: client created for {host}:{port}");
+                AppendLog($"AttachMqttClientFromHost: using clientId={uniqueClientId}");
 
-                // Setup message handler
+                // Setup message and connection handlers for diagnostics and automatic resubscribe
                 _mqttClient.ApplicationMessageReceivedAsync += HandleApplicationMessageAsync;
+                _mqttClient.ConnectedAsync += async args => {
+                    AppendLog("MQTT client Connected");
+                    try
+                    {
+                        // Attempt to re-subscribe to topics when connected
+                        await SubscribeToTopicsAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendLog("ConnectedAsync resubscribe failed: " + ex.Message);
+                    }
+                };
+                _mqttClient.DisconnectedAsync += args => {
+                    AppendLog("MQTT client Disconnected: " + (args?.Exception?.Message ?? "no exception"));
+                    return Task.CompletedTask;
+                };
 
                 // Connect and subscribe (fire-and-forget)
                 _ = ConnectAndSubscribeAsync();
@@ -921,31 +1082,26 @@ namespace PulsarUI.Services
                 
                 AppendLog($"ConnectAndSubscribeAsync: connected with result {response.ResultCode}");
 
-                // Subscribe to topics using builder pattern (like samples)
-                var topics = new[] 
-                { 
-                    "system/testmessage", 
-                    "inputs/status", 
-                    "inputs/timestamps", 
-                    "startline/runstart", 
-                    "apibridge/competitors", 
-                    "apibridge/bumpspot", 
-                    "apibridge/categories", 
-                    "apibridge/classes" 
-                };
-
-                var subscribeOptionsBuilder = _mqttFactory.CreateSubscribeOptionsBuilder();
-                foreach (var topic in topics)
+                try
                 {
-                    subscribeOptionsBuilder.WithTopicFilter(
-                        f => f.WithTopic(topic).WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-                    );
+                    // Log a few diagnostic fields from the connect response if present
+                    AppendLog($"Connect response: {response}");
                 }
+                catch { }
 
-                var subscribeOptions = subscribeOptionsBuilder.Build();
-                var subscribeResult = await _mqttClient.SubscribeAsync(subscribeOptions, CancellationToken.None);
+                // Give the client a short moment to settle before attempting subscriptions; some transports
+                // may report connected immediately but still be finalizing the socket state.
+                await Task.Delay(200);
 
-                AppendLog($"ConnectAndSubscribeAsync: subscribed to {topics.Length} topics");
+                // Subscribe to topics (attempt with a small retry if the client temporarily disconnects)
+                try
+                {
+                    await SubscribeToTopicsAsync();
+                }
+                catch (Exception ex)
+                {
+                    AppendLog("ConnectAndSubscribeAsync failed subscribing: " + ex.Message);
+                }
 
                 // Start reconnection monitor (like Reconnect_Using_Timer sample)
                 StartReconnectionMonitor();
@@ -1004,7 +1160,7 @@ namespace PulsarUI.Services
             if (_mqttClient == null || _options == null)
             {
                 AppendLog("EnsureConnectedAsync: creating default client for localhost:1883");
-                AttachMqttClientFromHost("127.0.0.1", 1883);
+                AttachMqttClientFromHost("192.168.20.100", 1883);
             }
 
             if (_mqttClient?.IsConnected != true)
@@ -1058,7 +1214,7 @@ namespace PulsarUI.Services
                 }
                 
                 AppendLog($"Message received on topic '{topic}'");
-                
+
                 return DispatchIncomingMessage(topic, payload);
             }
             catch (Exception ex)
@@ -1070,14 +1226,15 @@ namespace PulsarUI.Services
 
         private void RegisterTopicHandlers()
         {
-            _topicHandlers["inputs/status"] = HandleInputsStatusAsync;
-            _topicHandlers["inputs/timestamps"] = HandleInputTimestampsAsync;
-            _topicHandlers["startline/runstart"] = HandleStartLineRunStartAsync;
-            _topicHandlers["apibridge/competitors"] = HandleApiCompetitorsAsync;
-            _topicHandlers["apibridge/bumpspot"] = HandleApiBumpSpotAsync;
-            _topicHandlers["apibridge/categories"] = HandleApiCategoriesAsync;
-            _topicHandlers["apibridge/classes"] = HandleApiClassesAsync;
-            _topicHandlers["system/testmessage"] = HandleTestMessageAsync;
+            _topicHandlers["inputs/status"] = (topic, payload) => HandleInputsStatusAsync(payload);
+            _topicHandlers["inputs/timestamps"] = (topic, payload) => HandleInputTimestampsAsync(payload);
+            _topicHandlers["startline/runstart"] = (topic, payload) => HandleStartLineRunStartAsync(payload);
+            _topicHandlers["lanestart/"] = (topic, payload) => HandleLaneStartSourceAsync(topic, payload);
+            _topicHandlers["apibridge/competitors"] = (topic, payload) => HandleApiCompetitorsAsync(payload);
+            _topicHandlers["apibridge/bumpspot"] = (topic, payload) => HandleApiBumpSpotAsync(payload);
+            _topicHandlers["apibridge/categories"] = (topic, payload) => HandleApiCategoriesAsync(payload);
+            _topicHandlers["apibridge/classes"] = (topic, payload) => HandleApiClassesAsync(payload);
+            _topicHandlers["system/testmessage"] = (topic, payload) => HandleTestMessageAsync(payload);
         }
 
         public Task DispatchIncomingMessage(string topic, string payload)
@@ -1089,13 +1246,13 @@ namespace PulsarUI.Services
 
                 // Exact match
                 if (_topicHandlers.TryGetValue(topic, out var handler))
-                    return handler(payload);
+                    return handler(topic, payload);
 
                 // Prefix match
                 foreach (var kv in _topicHandlers)
                 {
                     if (topic.StartsWith(kv.Key, StringComparison.OrdinalIgnoreCase))
-                        return kv.Value(payload);
+                        return kv.Value(topic, payload);
                 }
 
                 AppendLog($"DispatchIncomingMessage: no handler for topic '{topic}'");
@@ -1169,7 +1326,7 @@ namespace PulsarUI.Services
                                 // Also clear buffered guard/stage events
                                 buf.GuardA.Clear();
                                 buf.GuardB.Clear();
-                                buf.StageRise = null;
+                                buf.StageEvents.Clear();
                                 AppendLog($"HandleStartLineRunStartAsync: lane={laneKey} set NoVehicle=true — cleared buffers");
                             }
                             else
@@ -1193,6 +1350,179 @@ namespace PulsarUI.Services
             catch (Exception ex)
             {
                 AppendLog("HandleStartLineRunStartAsync parse error: " + ex.Message);
+            }
+            return Task.CompletedTask;
+        }
+
+        // Handle lanestart topic messages, e.g. lanestart/left/source with payload "Stage" or "Guard"
+        private Task HandleLaneStartSourceAsync(string topic, string payload)
+        {
+            AppendLog($"HandleLaneStartSourceAsync: topic={topic} payload={payload}");
+            try
+            {
+                // Determine lane from topic parts: expected lanestart/{left|right}/...
+                string laneKey = null;
+                try
+                {
+                    var parts = topic.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 2)
+                    {
+                        if (parts[1].Equals("left", StringComparison.OrdinalIgnoreCase)) laneKey = "left";
+                        else if (parts[1].Equals("right", StringComparison.OrdinalIgnoreCase)) laneKey = "right";
+                    }
+                }
+                catch { }
+
+                // If lane not in topic, try to parse from JSON payload (optional)
+                if (laneKey == null && !string.IsNullOrWhiteSpace(payload))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(payload);
+                        if (doc.RootElement.TryGetProperty("Lane", out var l))
+                        {
+                            if (l.ValueKind == JsonValueKind.Number && l.TryGetInt32(out var li)) laneKey = li == 0 ? "left" : li == 1 ? "right" : null;
+                            else if (l.ValueKind == JsonValueKind.String)
+                            {
+                                var s = l.GetString();
+                                if (s != null && s.Equals("left", StringComparison.OrdinalIgnoreCase)) laneKey = "left";
+                                if (s != null && s.Equals("right", StringComparison.OrdinalIgnoreCase)) laneKey = "right";
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                if (laneKey == null)
+                {
+                    AppendLog("HandleLaneStartSourceAsync: could not determine lane; ignoring");
+                    return Task.CompletedTask;
+                }
+
+                // Parse source value
+                string sourceVal = null;
+                if (!string.IsNullOrWhiteSpace(payload))
+                {
+                    var trimmed = payload.Trim();
+                    if ((trimmed.StartsWith("\"") && trimmed.EndsWith("\"")) || (trimmed.StartsWith("'") && trimmed.EndsWith("'")))
+                        trimmed = trimmed.Substring(1, trimmed.Length - 2);
+
+                    if (trimmed.StartsWith("{"))
+                    {
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(trimmed);
+                            if (doc.RootElement.TryGetProperty("Source", out var s) || doc.RootElement.TryGetProperty("source", out s))
+                            {
+                                if (s.ValueKind == JsonValueKind.String) sourceVal = s.GetString();
+                            }
+                        }
+                        catch { }
+                    }
+
+                    if (sourceVal == null) sourceVal = trimmed;
+                }
+
+                if (string.IsNullOrWhiteSpace(sourceVal))
+                {
+                    AppendLog("HandleLaneStartSourceAsync: no source value provided; ignoring");
+                    return Task.CompletedTask;
+                }
+
+                sourceVal = sourceVal.Trim().ToLowerInvariant();
+
+                var buf = GetBufferForLane(laneKey);
+                // Copy buffered events for analysis
+                List<(long ts, bool dir)> aCopy, bCopy; List<(long ts, bool dir)> stageCopy;
+                lock (buf)
+                {
+                    aCopy = buf.GuardA.ToList();
+                    bCopy = buf.GuardB.ToList();
+                    stageCopy = buf.StageEvents.ToList();
+                }
+
+                // Determine guard enabled flags
+                bool guardAEnabled = false, guardBEnabled = false;
+                try
+                {
+                    if (_inputMapService != null)
+                    {
+                        if (laneKey == "left")
+                        {
+                            _inputMapService.TryGetIdentifier(InputRole.LeftGuardA, out var gA);
+                            _inputMapService.TryGetIdentifier(InputRole.LeftGuardB, out var gB);
+                            guardAEnabled = (gA != null && gA.Enabled);
+                            guardBEnabled = (gB != null && gB.Enabled);
+                        }
+                        else
+                        {
+                            _inputMapService.TryGetIdentifier(InputRole.RightGuardA, out var gA);
+                            _inputMapService.TryGetIdentifier(InputRole.RightGuardB, out var gB);
+                            guardAEnabled = (gA != null && gA.Enabled);
+                            guardBEnabled = (gB != null && gB.Enabled);
+                        }
+                    }
+                    else
+                    {
+                        guardAEnabled = (laneKey == "left") ? (_leftGuardAId != null && _leftGuardAId.Enabled) : (_rightGuardAId != null && _rightGuardAId.Enabled);
+                        guardBEnabled = (laneKey == "left") ? (_leftGuardBId != null && _leftGuardBId.Enabled) : (_rightGuardBId != null && _rightGuardBId.Enabled);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendLog("HandleLaneStartSourceAsync: error querying InputMapService: " + ex.Message);
+                }
+
+                long? stageStartTs = null;
+                if (sourceVal.Contains("stage"))
+                {
+                    var firstRemade = stageCopy.Where(x => x.dir).OrderBy(x => x.ts).Select(x => x.ts).FirstOrDefault();
+                    stageStartTs = firstRemade == 0 ? (long?)null : firstRemade;
+                }
+
+                if (_runManager == null || string.IsNullOrEmpty(_currentRunDevice) || !_currentRunInput.HasValue)
+                {
+                    AppendLog("HandleLaneStartSourceAsync: no current run or RunManager not attached; ignoring");
+                    lock (buf) buf.RecordingForLanestart = false;
+                    return Task.CompletedTask;
+                }
+
+                if (_runManager.TryComputeReactionTime(_currentRunDevice, _currentRunInput.Value, stageStartTs, aCopy, bCopy, guardAEnabled, guardBEnabled, out var rtNs, out var runId, out var detectionSource, out var detectionTimestampNs))
+                {
+                    lock (buf)
+                    {
+                        if (!buf.NoVehicle)
+                        {
+                                if (buf.LastPublishedRunId != runId)
+                                {
+                                    buf.LastPublishedRunId = runId;
+                                    // Defer publishing to ViewModel to ensure reactionTimeString matches UI (uses ExpectedReactionTimeNs)
+                                    AppendLog($"Computed reaction time (lanestart) lane={laneKey} rt_ns={rtNs} runId={runId} source={detectionSource} (publish deferred to ViewModel)");
+                                    buf.DetectionTimestampNs = detectionTimestampNs;
+                                    try { ReactionTimeComputed?.Invoke(laneKey, rtNs, runId, detectionSource, detectionTimestampNs); } catch (Exception ex) { AppendLog("ReactionTimeComputed handler threw: " + ex.Message); }
+                                }
+                        }
+                        else
+                        {
+                            AppendLog($"RT suppressed for lane={laneKey} because NoVehicle=true");
+                        }
+
+                        // Stop recording and clear buffers for this lane now that lanestart source is known
+                        buf.RecordingForLanestart = false;
+                        buf.StageEvents.Clear();
+                        buf.GuardA.Clear();
+                        buf.GuardB.Clear();
+                    }
+                }
+                else
+                {
+                    AppendLog($"HandleLaneStartSourceAsync: TryComputeReactionTime returned false for lane={laneKey}");
+                    lock (buf) buf.RecordingForLanestart = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("HandleLaneStartSourceAsync error: " + ex.Message);
             }
             return Task.CompletedTask;
         }
@@ -1412,25 +1742,30 @@ namespace PulsarUI.Services
 
                 var leftPayload = JsonSerializer.Serialize(new 
                 { 
-                    seqType = left.Tree?.Id, 
-                    seqSpeed = left.Tree?.Name, 
-                    index = left.HandicapIndex 
+                    seqType = left.Tree?.CountdownType, 
+                    seqSpeed = left.Tree?.CountdownSpeed, 
+                    index = left.HandicapIndex,
                 });
                 
                 var rightPayload = JsonSerializer.Serialize(new 
                 { 
-                    seqType = right.Tree?.Id, 
-                    seqSpeed = right.Tree?.Name, 
+                    seqType = right.Tree?.CountdownType, 
+                    seqSpeed = right.Tree?.CountdownSpeed, 
                     index = right.HandicapIndex 
                 });
 
                 var publishLeft = PublishMqtt("runconfig/left", leftPayload);
                 var publishRight = PublishMqtt("runconfig/right", rightPayload);
 
+                var rDelay = new Random();
+                
                 var categoryPayload = JsonSerializer.Serialize(new 
                 { 
                     runTimeout = categ?.CategoryDetails?.RunTimeout ?? 0, 
-                    mode = categ?.Mode ?? 0 
+                    mode = categ?.Mode ?? 0,
+                    deepStageFoul = categ?.CategoryDetails?.DeepStageFoul ?? false,
+                    delayTime = rDelay.Next(categ?.CategoryDetails?.DelayMin ?? 0, categ?.CategoryDetails?.DelayMax ?? 0),
+                    foulInEmpty = categ?.CategoryDetails?.FoulInEmpty ?? false
                 });
                 
                 var publishCategory = PublishMqtt("runconfig/setup", categoryPayload);
@@ -1448,6 +1783,12 @@ namespace PulsarUI.Services
         { 
             AppendLog("ResetSystemAsync called"); 
             return PublishMqtt("runconfig/reset", "0"); 
+        }
+
+        public Task ConsoleStartAsync()
+        {
+            AppendLog("ConsoleStartAsync called");
+            return PublishMqtt("runconfig/consolestart", "0");
         }
 
         public void Dispose()

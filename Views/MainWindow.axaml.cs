@@ -49,6 +49,13 @@ namespace PulsarUI.Views
                 Command = new RelayCommand(_ => ToggleCategoryPopup())
             });
 
+            // Add F8 keybinding to invoke AbortRun (if available) so keyboard F8 triggers the command
+            this.KeyBindings.Add(new KeyBinding
+            {
+                Gesture = new KeyGesture(Key.F8),
+                Command = new RelayCommand(_ => { try { var vm = _viewModel; if (vm != null) ((dynamic)vm).ExecuteAbortRun(); } catch { } })
+            });
+
             // Build category grid after InitializeComponent to ensure CategoryGrid is available
             this.Opened += (_, _) => BuildCategoryGrid();
 
@@ -122,6 +129,13 @@ namespace PulsarUI.Views
             {
                 Gesture = new KeyGesture(Key.F12),
                 Command = new RelayCommand(_ => ToggleCategoryPopup())
+            });
+
+            // Add F8 keybinding to invoke AbortRun (if available) so keyboard F8 triggers the command
+            this.KeyBindings.Add(new KeyBinding
+            {
+                Gesture = new KeyGesture(Key.F8),
+                Command = new RelayCommand(_ => { try { var vm = _viewModel; if (vm != null) ((dynamic)vm).ExecuteAbortRun(); } catch { } })
             });
 
             // Build category grid after InitializeComponent to ensure CategoryGrid is available
