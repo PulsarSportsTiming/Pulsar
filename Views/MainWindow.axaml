@@ -115,72 +115,50 @@
         <Grid Grid.Row="1" Grid.Column="1" Background="{DynamicResource TitleBackground}" RowDefinitions="*"
               Margin="0,1,0,1">
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto"
-                  RowDefinitions="*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*,*">
+                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,10*,Auto,Auto,Auto,Auto">
 
                 <controls:SysStatusLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="SysEng"
                                          IsVisible="{Binding SystemEngaged}" />
                 <controls:SysStatusLabel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Classes="RunAct"
                                          IsVisible="{Binding RunActive}" />
 
-                <controls:SensorIcon Grid.Row="1" Grid.Column="0" Classes="OK" />
+                <controls:SensorIcon Grid.Row="1" Grid.Column="0" Status="{Binding LeftPreStageStatus}" />
                 <controls:SensorLabel Grid.Row="1" Grid.Column="1" Classes="Enabled"
                                       SensorLabelText="Pre-Stage" />
-                <controls:SensorIcon Grid.Row="1" Grid.Column="2" Classes="Blocked" />
+                <controls:SensorIcon Grid.Row="1" Grid.Column="2" Status="{Binding RightPreStageStatus}" />
 
-                <controls:SensorIcon Grid.Row="2" Grid.Column="0" Classes="OK" />
+                <controls:SensorIcon Grid.Row="2" Grid.Column="0" Status="{Binding LeftStageLockStatus}" />
                 <controls:SensorLabel Grid.Row="2" Grid.Column="1" Classes="Enabled"
                                       SensorLabelText="Stage Lock" />
-                <controls:SensorIcon Grid.Row="2" Grid.Column="2" Classes="Blocked" />
+                <controls:SensorIcon Grid.Row="2" Grid.Column="2" Status="{Binding RightStageLockStatus}" />
 
-                <controls:SensorIcon Grid.Row="3" Grid.Column="0" Classes="OK" />
+                <controls:SensorIcon Grid.Row="3" Grid.Column="0" Status="{Binding LeftStageStatus}" />
                 <controls:SensorLabel Grid.Row="3" Grid.Column="1" Classes="Enabled" SensorLabelText="Stage" />
-                <controls:SensorIcon Grid.Row="3" Grid.Column="2" Classes="Blocked" />
+                <controls:SensorIcon Grid.Row="3" Grid.Column="2" Status="{Binding RightStageStatus}" />
 
-                <controls:SensorIcon Grid.Row="4" Grid.Column="0" Classes="OK" />
-                <controls:SensorLabel Grid.Row="4" Grid.Column="1" Classes="Enabled" SensorLabelText="Guard" />
-                <controls:SensorIcon Grid.Row="4" Grid.Column="2" Classes="OK" />
+                <controls:SensorIcon Grid.Row="4" Grid.Column="0" Status="{Binding LeftGuardAStatus}" />
+                <controls:SensorLabel Grid.Row="4" Grid.Column="1" Classes="Enabled" SensorLabelText="Guard A" />
+                <controls:SensorIcon Grid.Row="4" Grid.Column="2" Status="{Binding RightGuardAStatus}" />
 
-                <controls:SensorIcon Grid.Row="5" Grid.Column="0" Classes="OK" />
-                <controls:SensorLabel Grid.Row="5" Grid.Column="1" Classes="Enabled" SensorLabelText="18.288m" />
-                <controls:SensorIcon Grid.Row="5" Grid.Column="2" Classes="OK" />
+                <controls:SensorIcon Grid.Row="5" Grid.Column="0" Status="{Binding LeftGuardBStatus}" />
+                <controls:SensorLabel Grid.Row="5" Grid.Column="1" Classes="Enabled" SensorLabelText="Guard B" />
+                <controls:SensorIcon Grid.Row="5" Grid.Column="2" Status="{Binding RightGuardBStatus}" />
 
-                <controls:SensorIcon Grid.Row="6" Grid.Column="0" Classes="OK" />
-                <controls:SensorLabel Grid.Row="6" Grid.Column="1" Classes="Enabled" SensorLabelText="80.467m" />
-                <controls:SensorIcon Grid.Row="6" Grid.Column="2" Classes="OK" />
+                <ItemsControl Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3"
+                              ItemsSource="{Binding DownTrackStatusRows}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                <controls:SensorIcon Grid.Column="0" Status="{Binding LeftStatus}" />
+                                <controls:SensorLabel Grid.Column="1" Classes="Enabled"
+                                                      SensorLabelText="{Binding DistanceLabel}" />
+                                <controls:SensorIcon Grid.Column="2" Status="{Binding RightStatus}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
 
-                <controls:SensorIcon Grid.Row="7" Grid.Column="0" Classes="OK" />
-                <controls:SensorLabel Grid.Row="7" Grid.Column="1" Classes="Enabled" SensorLabelText="100.584m" />
-                <controls:SensorIcon Grid.Row="7" Grid.Column="2" Classes="OK" />
-
-                <controls:SensorIcon Grid.Row="8" Grid.Column="0" Classes="OK" />
-                <controls:SensorLabel Grid.Row="8" Grid.Column="1" Classes="Enabled" SensorLabelText="181.051m" />
-                <controls:SensorIcon Grid.Row="8" Grid.Column="2" Classes="OK" />
-
-                <controls:SensorIcon Grid.Row="9" Grid.Column="0" Classes="OK" />
-                <controls:SensorLabel Grid.Row="9" Grid.Column="1" Classes="Enabled" SensorLabelText="201.168m" />
-                <controls:SensorIcon Grid.Row="9" Grid.Column="2" Classes="OK" />
-
-                <controls:SensorIcon Grid.Row="10" Grid.Column="0" Classes="Error" />
-                <controls:SensorLabel Grid.Row="10" Grid.Column="1" Classes="Enabled"
-                                      SensorLabelText="284.683m" />
-                <controls:SensorIcon Grid.Row="10" Grid.Column="2" Classes="Error" />
-
-                <controls:SensorIcon Grid.Row="11" Grid.Column="0" Classes="OK" />
-                <controls:SensorLabel Grid.Row="11" Grid.Column="1" Classes="Enabled"
-                                      SensorLabelText="304.800m" />
-                <controls:SensorIcon Grid.Row="11" Grid.Column="2" Classes="OK" />
-
-                <controls:SensorIcon Grid.Row="12" Grid.Column="0" Classes="OKInactive" />
-                <controls:SensorLabel Grid.Row="12" Grid.Column="1" Classes="Disabled"
-                                      SensorLabelText="382.219m" />
-                <controls:SensorIcon Grid.Row="12" Grid.Column="2" Classes="OKInactive" />
-
-                <controls:SensorIcon Grid.Row="13" Grid.Column="0" Classes="ErrorInactive" />
-                <controls:SensorLabel Grid.Row="13" Grid.Column="1" Classes="Disabled"
-                                      SensorLabelText="402.336m" />
-                <controls:SensorIcon Grid.Row="13" Grid.Column="2" Classes="OKInactive" />
-
-                <Grid Grid.Row="14" Column="0" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto,*">
+                <Grid Grid.Row="7" Column="0" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto,*">
                     <Label Grid.Column="0" Classes="StandardLabel" HorizontalAlignment="Left"
                            Content="{Binding EngagePairLeftTreeText}" />
                     <Label Grid.Column="1" Classes="StandardLabel" HorizontalAlignment="Center" Content="— Tree —" />
@@ -188,7 +166,7 @@
                            Content="{Binding EngagePairRightTreeText}" />
                 </Grid>
 
-                <Grid Grid.Row="15" Grid.Column="0" Grid.RowSpan="4" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto,*"
+                <Grid Grid.Row="8" Grid.Column="0" Grid.RowSpan="3" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto,*"
                       RowDefinitions="*,*,*">
                     <Label Grid.Column="0" Grid.Row="0" Classes="StandardLabel" HorizontalAlignment="Right"
                            Content="Start Mode" />

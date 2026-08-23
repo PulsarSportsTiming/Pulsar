@@ -41,6 +41,30 @@ namespace PulsarUI.ViewModels
         [ObservableProperty]
         private ObservableCollection<TimingLabelItem> _rightTimingLabels = new();
 
+        // --- Live System Status panel state ---
+        // Status strings match SensorIcon style class names: "OK", "Blocked", "Error", "OKInactive".
+        private const string StatusOk = "OK";
+        private const string StatusBlocked = "Blocked";
+        private const string StatusError = "Error";
+        private const string StatusInactive = "OKInactive";
+
+        [ObservableProperty] private string _leftPreStageStatus = StatusBlocked;
+        [ObservableProperty] private string _rightPreStageStatus = StatusBlocked;
+        [ObservableProperty] private string _leftStageLockStatus = StatusBlocked;
+        [ObservableProperty] private string _rightStageLockStatus = StatusBlocked;
+        [ObservableProperty] private string _leftStageStatus = StatusBlocked;
+        [ObservableProperty] private string _rightStageStatus = StatusBlocked;
+        [ObservableProperty] private string _leftGuardAStatus = StatusError;
+        [ObservableProperty] private string _rightGuardAStatus = StatusError;
+        [ObservableProperty] private string _leftGuardBStatus = StatusError;
+        [ObservableProperty] private string _rightGuardBStatus = StatusError;
+
+        public ObservableCollection<DownTrackStatusRow> DownTrackStatusRows { get; } = new();
+        private readonly Dictionary<int, DownTrackStatusRow> _downTrackRowsByDistance = new();
+        // Records whether a given role participates in live status tracking (false = disabled in inputmap.json).
+        private readonly Dictionary<InputRole, bool> _roleEnabled = new();
+        private InputMapService? _inputMapService;
+
         // Enable/disable debug publishing and local logging (toggle while diagnosing)
         // Read from environment variables so debugging can be turned on without changing code repeatedly.
         // Set PULSAR_ENABLE_DEBUG=1 to enable VM debug messages (writes to /tmp/pulsarui_debug.log via LocalLog)
@@ -662,6 +686,7 @@ namespace PulsarUI.ViewModels
                 var inputMapPath = Path.Combine(AppContext.BaseDirectory, "Config", "inputmap.json");
                 MaybeDebug("MainWindowViewModel: trying inputMapPath='" + inputMapPath + "' exists=" + File.Exists(inputMapPath));
                 var ims = new InputMapService(inputMapPath);
+                _inputMapService = ims;
                 _mqttService.AttachInputMapService(ims);
             }
             catch (Exception ex)
@@ -724,6 +749,43 @@ namespace PulsarUI.ViewModels
             catch (Exception ex)
             {
                 LocalLog("Failed to load/generate timing labels from inputmap.json: " + ex.Message);
+            }
+
+            // Build the live System Status panel's initial state (default statuses + DownTrack rows) from
+            // the loaded input map. Must run after _inputMapService/_cachedInputs are populated above.
+            try
+            {
+                InitializeSensorStatusPanel();
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to initialize sensor status panel: " + ex.Message);
+            }
+
+            // Wire up live sensor status events so the System Status panel reflects rising/falling edges
+            // regardless of whether a run is currently active.
+            try
+            {
+                _mqttService.InputRoleStatusChanged += (role, direction) =>
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        try { ApplyInputRoleStatus(role, direction); }
+                        catch (Exception ex) { LocalLog("ApplyInputRoleStatus failed: " + ex.Message); }
+                    });
+                };
+                _mqttService.DownTrackInputStatusChanged += (dti, direction) =>
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        try { ApplyDownTrackInputStatus(dti, direction); }
+                        catch (Exception ex) { LocalLog("ApplyDownTrackInputStatus failed: " + ex.Message); }
+                    });
+                };
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Failed to wire sensor status handlers: " + ex.Message);
             }
             // Wire up test message handler: surface to ViewModel properties so View can react
             try
@@ -1879,6 +1941,136 @@ namespace PulsarUI.ViewModels
                         }
                     }
                 });
+            }
+        }
+
+        // Builds the System Status panel's initial state: per-role default status (Blocked for
+        // Pre-Stage/Stage Lock/Stage, Error for Guard A/Guard B, or Inactive when disabled in
+        // inputmap.json), and the DownTrackStatusRows collection (one row per distinct distance,
+        // sorted ascending, Left = lane 0 / Right = lane 1).
+        private void InitializeSensorStatusPanel()
+        {
+            // Roles participating in live tracking (RunStartTrigger/Unknown are excluded).
+            var trackedRoles = new[]
+            {
+                InputRole.LeftPreStage, InputRole.RightPreStage,
+                InputRole.LeftStageLock, InputRole.RightStageLock,
+                InputRole.LeftStage, InputRole.RightStage,
+                InputRole.LeftGuardA, InputRole.RightGuardA,
+                InputRole.LeftGuardB, InputRole.RightGuardB
+            };
+
+            foreach (var role in trackedRoles)
+            {
+                bool enabled = true;
+                try
+                {
+                    if (_inputMapService != null && _inputMapService.TryGetIdentifier(role, out var id))
+                    {
+                        enabled = id.Enabled;
+                    }
+                    else
+                    {
+                        LocalLog($"InitializeSensorStatusPanel: role={role} not found in inputmap.json RoleMap; defaulting to enabled");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LocalLog($"InitializeSensorStatusPanel: TryGetIdentifier failed for role={role}: {ex.Message}");
+                }
+
+                _roleEnabled[role] = enabled;
+                if (!enabled)
+                {
+                    SetRoleStatus(role, StatusInactive);
+                }
+            }
+
+            DownTrackStatusRows.Clear();
+            _downTrackRowsByDistance.Clear();
+
+            if (_cachedInputs == null) return;
+
+            var distanceUnit = _cachedDistanceUnit ?? AppSettings.DistanceUnit;
+
+            var byDistance = _cachedInputs
+                .GroupBy(i => i.DistanceMm)
+                .OrderBy(g => g.Key);
+
+            foreach (var group in byDistance)
+            {
+                var distanceMm = group.Key;
+                var leftEntry = group.FirstOrDefault(i => i.Lane == InputLane.Left);
+                var rightEntry = group.FirstOrDefault(i => i.Lane == InputLane.Right);
+
+                var leftEnabled = leftEntry?.Enabled ?? false;
+                var rightEnabled = rightEntry?.Enabled ?? false;
+
+                var row = new DownTrackStatusRow
+                {
+                    DistanceMm = distanceMm,
+                    DistanceLabel = TimingLabelHelpers.FormatDistanceLabel(distanceMm, distanceUnit),
+                    LeftEnabled = leftEnabled,
+                    RightEnabled = rightEnabled,
+                    LeftStatus = leftEnabled ? StatusError : StatusInactive,
+                    RightStatus = rightEnabled ? StatusError : StatusInactive
+                };
+
+                DownTrackStatusRows.Add(row);
+                _downTrackRowsByDistance[distanceMm] = row;
+            }
+        }
+
+        // Sets the status property backing a given tracked role. Centralized so both initialization
+        // and live edge updates share the same role -> property mapping.
+        private void SetRoleStatus(InputRole role, string status)
+        {
+            switch (role)
+            {
+                case InputRole.LeftPreStage: LeftPreStageStatus = status; break;
+                case InputRole.RightPreStage: RightPreStageStatus = status; break;
+                case InputRole.LeftStageLock: LeftStageLockStatus = status; break;
+                case InputRole.RightStageLock: RightStageLockStatus = status; break;
+                case InputRole.LeftStage: LeftStageStatus = status; break;
+                case InputRole.RightStage: RightStageStatus = status; break;
+                case InputRole.LeftGuardA: LeftGuardAStatus = status; break;
+                case InputRole.RightGuardA: RightGuardAStatus = status; break;
+                case InputRole.LeftGuardB: LeftGuardBStatus = status; break;
+                case InputRole.RightGuardB: RightGuardBStatus = status; break;
+            }
+        }
+
+        // Applies a live edge (rising/falling) to the corresponding role's status.
+        // Falling edge -> Blocked (Pre-Stage/Stage Lock/Stage) or Error (Guard A/Guard B).
+        // Rising edge -> OK. RunStartTrigger/Unknown are ignored. Disabled roles never change.
+        private void ApplyInputRoleStatus(InputRole role, bool direction)
+        {
+            if (role == InputRole.RunStartTrigger || role == InputRole.Unknown) return;
+            if (_roleEnabled.TryGetValue(role, out var enabled) && !enabled) return;
+
+            bool isGuard = role is InputRole.LeftGuardA or InputRole.RightGuardA
+                                  or InputRole.LeftGuardB or InputRole.RightGuardB;
+            string status = direction ? StatusOk : (isGuard ? StatusError : StatusBlocked);
+
+            SetRoleStatus(role, status);
+        }
+
+        // Applies a live edge (rising/falling) to the DownTrackStatusRow matching the given input's distance.
+        // Falling edge -> Error. Rising edge -> OK. Disabled lanes never change.
+        private void ApplyDownTrackInputStatus(DownTrackInput dti, bool direction)
+        {
+            if (dti == null) return;
+            if (!_downTrackRowsByDistance.TryGetValue(dti.DistanceMm, out var row)) return;
+
+            if (dti.Lane == InputLane.Left)
+            {
+                if (!row.LeftEnabled) return;
+                row.LeftStatus = direction ? StatusOk : StatusError;
+            }
+            else
+            {
+                if (!row.RightEnabled) return;
+                row.RightStatus = direction ? StatusOk : StatusError;
             }
         }
 

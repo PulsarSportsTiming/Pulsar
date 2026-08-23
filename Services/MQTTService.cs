@@ -30,6 +30,14 @@ namespace PulsarUI.Services
         // Event raised when a lane's DS foul flag is updated via startline/runstart payload
         // Parameters: lane ("left"/"right"), dsFoul (bool)
         public event Action<string, bool>? LaneDsFoulChanged;
+        // Event raised unconditionally whenever a timestamp message resolves to a configured InputRole
+        // (excluding InputRole.Unknown). Used to drive the live System Status panel.
+        // Parameters: role, direction (true = rising edge, false = falling edge)
+        public event Action<InputRole, bool>? InputRoleStatusChanged;
+        // Event raised unconditionally whenever a timestamp message resolves to a configured DownTrackInput.
+        // Used to drive the live System Status panel.
+        // Parameters: DownTrackInput, direction (true = rising edge, false = falling edge)
+        public event Action<DownTrackInput, bool>? DownTrackInputStatusChanged;
 
         // Simple diagnostic log helper (append-only)
         private static void AppendLog(string msg)
@@ -384,6 +392,20 @@ namespace PulsarUI.Services
                 AppendLog("FindDownTrackInput lookup failed: " + ex.Message);
             }
 
+            // Raise the live status event unconditionally for any matched DownTrackInput, regardless of
+            // run/lane-buffer state, so the System Status panel always reflects the current edge direction.
+            if (dti != null)
+            {
+                try
+                {
+                    DownTrackInputStatusChanged?.Invoke(dti, timestampModel.Direction);
+                }
+                catch (Exception ex)
+                {
+                    AppendLog("DownTrackInputStatusChanged handler threw: " + ex.Message);
+                }
+            }
+
             // If this timestamp matches a configured DownTrackInput and we have a recorded detection timestamp for that lane,
             // compute an incremental time and publish it and raise an event for the UI.
             // NOTE: only use downtrack timestamps with direction == false (falling edge) per configuration.
@@ -613,6 +635,17 @@ namespace PulsarUI.Services
                     {
                         extra += $" Role:{role}";
                         AppendLog($"TryGetRole: matched id='{id}' -> role={role}");
+
+                        // Raise the live status event unconditionally for any matched role, regardless of
+                        // run state, so the System Status panel always reflects the current edge direction.
+                        try
+                        {
+                            InputRoleStatusChanged?.Invoke(role, timestampModel.Direction);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLog("InputRoleStatusChanged handler threw: " + ex.Message);
+                        }
 
                         // Handle relevant roles for run start / stage / guards
                         try
