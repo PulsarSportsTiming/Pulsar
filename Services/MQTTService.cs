@@ -386,10 +386,10 @@ namespace PulsarUI.Services
 
             // If this timestamp matches a configured DownTrackInput and we have a recorded detection timestamp for that lane,
             // compute an incremental time and publish it and raise an event for the UI.
-            // NOTE: only use downtrack timestamps with direction == true (rising edge) per configuration.
+            // NOTE: only use downtrack timestamps with direction == false (falling edge) per configuration.
             try
             {
-                if (dti != null && timestampModel.Direction)
+                if (dti != null && !timestampModel.Direction)
                 {
                     var lane = dti.Lane.ToString().ToLowerInvariant();
                     var buf = GetBufferForLane(lane);
