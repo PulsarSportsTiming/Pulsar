@@ -9,6 +9,8 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using PulsarUI.ViewModels;
 using System.Windows.Input;
+using Avalonia;
+using Avalonia.Diagnostics;
 
 namespace PulsarUI.Views
 {
@@ -42,6 +44,14 @@ namespace PulsarUI.Views
             this.AddHandler(KeyDownEvent, OnWindowKeyDown, handledEventsToo: true);
             // Fallback: also subscribe to KeyDown event
             this.KeyDown += OnWindowKeyDown;
+            
+            #if DEBUG
+            this.AttachDevTools(new DevToolsOptions
+            {
+                Gesture = new KeyGesture(Key.F12, KeyModifiers.Control)
+            });
+            #endif
+            
             // Add explicit KeyBinding for F12 to ensure it triggers ToggleCategoryPopup
             this.KeyBindings.Add(new KeyBinding
             {
@@ -124,6 +134,14 @@ namespace PulsarUI.Views
             this.AddHandler(KeyDownEvent, OnWindowKeyDown, handledEventsToo: true);
             // Fallback: also subscribe to KeyDown event
             this.KeyDown += OnWindowKeyDown;
+            
+            #if DEBUG
+            this.AttachDevTools(new DevToolsOptions
+            {
+                Gesture = new KeyGesture(Key.F12, KeyModifiers.Control)
+            });
+            #endif
+            
             // Add explicit KeyBinding for F12 in the other constructor as well
             this.KeyBindings.Add(new KeyBinding
             {
@@ -284,13 +302,13 @@ namespace PulsarUI.Views
 
         private void OnWindowKeyDown(object? sender, KeyEventArgs e)
         {
-            // Toggle CategoryPopup with F12 (regardless of SetupActive state for now)
-            if (e.Key == Key.F12)
-            {
-                ToggleCategoryPopup();
-                e.Handled = true;
-                return;
-            }
+            // NOTE: F12 is already handled by the KeyBinding/HotKey registered on this Window
+            // (see constructors and MainWindow.axaml's F12Button HotKey). Avalonia processes
+            // KeyBindings BEFORE raising the routed KeyDown event, and it raises KeyDown
+            // regardless of whether a KeyBinding already handled it. Because this handler is
+            // registered with handledEventsToo: true, re-handling F12 here would call
+            // ToggleCategoryPopup() a second time for the same keypress, immediately closing
+            // the popup that the KeyBinding had just opened. Do not add F12 handling here.
 
             // If the category popup is open, handle digit input for selecting categories
             if (CategoryPopup != null && CategoryPopup.IsOpen)

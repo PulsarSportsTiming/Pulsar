@@ -486,7 +486,8 @@
                     <Label Classes="FKeyText" Content="Abort" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="8" x:Name="F9Button" Classes="FKey" HotKey="F9">
+            <Button Grid.Column="8" x:Name="F9Button" Classes="FKey" HotKey="F9"
+                    Command="{Binding ClearCommand}" IsEnabled="{Binding IsF9Enabled}">
                 <StackPanel Classes="FKeySP">
                     <Label Classes="FKeyText" Content="F9" />
                     <Label Classes="FKeyText" Content="Clear" />

@@ -102,7 +102,25 @@ namespace PulsarUI.ViewModels
                 if (EngagedPairModel != null)
                     return;
 
+                // A new system/pair is being engaged for a fresh run attempt: clear any stale
+                // per-lane "no vehicle" state left over from a previous attempt so it can't leak
+                // into this one.
+                try
+                {
+                    _mqttService?.ResetLaneNoVehicleFlags();
+                }
+                catch (Exception ex)
+                {
+                    LocalLog("ResetLaneNoVehicleFlags failed: " + ex.Message);
+                }
+
                 var p = new Pair { Id = Guid.NewGuid() };
+
+                // A fresh pair is being engaged - drop any DB identity left over from the
+                // previous run so persistence calls for the new run start from a clean slate.
+                _currentRunPairId = null;
+                _currentRunIndvIds[0] = null;
+                _currentRunIndvIds[1] = null;
 
                 // Resolve category for the engaged pair. Prefer CategoryDetails if populated.
                 Category? resolvedCat = EngagePairQueueCategory?.CategoryDetails?.Id != 0
@@ -120,8 +138,19 @@ namespace PulsarUI.ViewModels
                 // Populate expected reaction times
                 PulsarUI.Services.TimingHelpers.PopulateExpectedReactionTimes(p);
 
+                // A fresh pair is being engaged - drop any snapshot kept around for Clear (F9)
+                // from a previous pair so it can't leak into this one.
+                _lastEngagedPairModel = null;
+
                 EngagedPairModel = p;
                 MaybeDebug($"Created EngagedPair {p.Id} CategoryId={p.Category?.Id} Mode={p.RunMode}");
+
+                // A fresh pair starts with empty Remarks/Results on both lanes; clear the
+                // last-published MQTT cache so this run's own remarks/results (even if they
+                // happen to match the previous run's, e.g. another "Winner") are published
+                // rather than being suppressed as "unchanged" from the prior run.
+                _lastPublishedResults.Clear();
+                _lastPublishedRemarks.Clear();
 
                 // Refresh timing labels to match engaged pair finish line (if configured)
                 if (EngagePairQueueCategory != null && FinishList != null)
@@ -168,9 +197,20 @@ namespace PulsarUI.ViewModels
             }
             else
             {
+                // Keep a snapshot of the just-disengaged pair so CanClear()/Clear() (F9) can
+                // still see/reset its lane details afterwards - SystemEngaged is set false as
+                // part of normal run completion (see MaybeCheckAndCompleteRun), at which point
+                // EngagedPairModel is nulled out below, but the operator still needs to be able
+                // to clear the results that were just displayed.
+                _lastEngagedPairModel = EngagedPairModel;
+
                 // Clear when the system is disengaged
                 EngagedPairModel = null;
                 MaybeDebug("Cleared EngagedPairModel due to disengage");
+                // Defensive: ensure the breakout-check timer isn't left running against a
+                // cleared pair if this path is ever reached without RunActive having
+                // already been set false first.
+                StopBreakoutCheckTimer();
 
                 // Only restore full list if no category is engaged
                 if (EngagePairQueueCategory?.Category == 0)
@@ -186,6 +226,72 @@ namespace PulsarUI.ViewModels
         {
             UpdateButtonStatuses();
             try { _abortRunCommandRef?.NotifyCanExecuteChanged(); } catch { }
+
+            if (value)
+            {
+                StartBreakoutCheckTimer();
+                StartRunTimer();
+            }
+            else
+            {
+                StopBreakoutCheckTimer();
+                StopRunTimer();
+            }
+        }
+
+        // Run timeout timer. Begins when the run is made active and continues for the duration
+        // of the run for the time specified in the category configuration, unless stopped by
+        // the run completing naturally. Run Aborted is remarked on each non-finished lane
+        private DispatcherTimer? _runTimer;
+
+        private void StartRunTimer()
+        {
+            StopRunTimer();
+            _runTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(EngagedPairModel.Category.RunTimeout) };
+            _runTimer.Tick += (_, _) =>
+            {
+                AbortRun();
+            };
+            _runTimer.Start();
+        }
+        
+        private void StopRunTimer()
+        {
+            if (_runTimer == null) return;
+            _runTimer.Stop();
+            _runTimer = null;
+        }
+
+        // Periodic (1s) check that can award an early breakout-based win once it becomes
+        // mathematically certain a still-running lane cannot tie/out-breakout a lane that
+        // already finished with a breakout, without waiting for its literal finish event.
+        // See TimingHelpers.EvaluateWinnerLoseResult's nowNs parameter. Started/stopped
+        // alongside RunActive (mirrors the existing _clockTimer pattern).
+        private DispatcherTimer? _breakoutCheckTimer;
+
+        private void StartBreakoutCheckTimer()
+        {
+            StopBreakoutCheckTimer();
+            _breakoutCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _breakoutCheckTimer.Tick += (_, _) =>
+            {
+                try
+                {
+                    long nowNs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000_000L;
+                    RefreshWinnerLoseResult(nowNs);
+                }
+                catch (Exception ex) { LocalLog("BreakoutCheckTimer tick error: " + ex.Message); }
+            };
+            _breakoutCheckTimer.Start();
+        }
+
+        private void StopBreakoutCheckTimer()
+        {
+            if (_breakoutCheckTimer != null)
+            {
+                _breakoutCheckTimer.Stop();
+                _breakoutCheckTimer = null;
+            }
         }
         
         [ObservableProperty] private long _runStartTimestampNanoseconds;
@@ -212,6 +318,7 @@ namespace PulsarUI.ViewModels
         private CommunityToolkit.Mvvm.Input.IRelayCommand? _resetEngageCommandRef;
         private CommunityToolkit.Mvvm.Input.IRelayCommand? _swapEngageCommandRef;
         private CommunityToolkit.Mvvm.Input.IRelayCommand? _abortRunCommandRef;
+        private CommunityToolkit.Mvvm.Input.IRelayCommand? _clearCommandRef;
 
         // Explicit ICommand properties for ClearQueue and SwapEngagedPair (initialized in ctor)
         public CommunityToolkit.Mvvm.Input.IRelayCommand ClearQueueCommand { get; private set; } = default!;
@@ -320,6 +427,12 @@ namespace PulsarUI.ViewModels
         // Holds the generated Pair when the system becomes engaged
         public Pair? EngagedPairModel { get; private set; }
 
+        // Snapshot of the most recently disengaged Pair, kept only so CanClear()/Clear() (F9)
+        // can still see and reset lane details after SystemEngaged/EngagedPairModel have
+        // already been cleared (e.g. on normal run completion). Reset to null as soon as a
+        // fresh pair is engaged - see OnSystemEngagedChanged.
+        private Pair? _lastEngagedPairModel;
+
         // Cache input map data for refreshing timing labels based on engaged category
         private List<DownTrackInput>? _cachedInputs;
         private List<SpeedTrap>? _cachedTraps;
@@ -328,6 +441,15 @@ namespace PulsarUI.ViewModels
         private bool _runCompletionLogged;
         private readonly string _runLogPath = "/tmp/pulsarui_runlog.txt";
         private DispatcherTimer? _clockTimer;
+
+        // --- Run persistence (run_pair/run_indv) in-memory identity ---
+        // Set once the current pair's run_pair/run_indv rows are inserted (RunStartReceived
+        // handler); null means persistence isn't available for the current run (insert
+        // failed, tables missing, or the insert hasn't completed yet) - all downstream
+        // persistence calls must treat null as "skip silently". Reset defensively whenever
+        // a fresh pair is engaged (see OnSystemEngagedChanged).
+        private long? _currentRunPairId;
+        private readonly long?[] _currentRunIndvIds = new long?[2]; // [0]=left, [1]=right
 
         public MainWindowViewModel()
         {
@@ -458,9 +580,8 @@ namespace PulsarUI.ViewModels
                                         {
                                             remarksList.Add(RunRemarks.Foul);
                                             run.Remarks = remarksList.ToArray();
-                                            // Publish a debug MQTT message so external tools or logs can observe remark changes regardless of local logging
-                                            try { _ = _mqttService.PublishMqtt($"pulsarui/remark/{lane}", $"Added:Foul:{deltaNs}"); } catch { }
                                             LocalLog($"Added RunRemarks.Foul for lane={lane} deltaNs={deltaNs} ValueNs={run.ReactionTime.ValueNs} ExpectedNs={run.ReactionTime.ExpectedReactionTimeNs}");
+                                            SyncRunRemark(runIndex, RunRemarks.Foul, true);
                                         }
                                     }
                                     else
@@ -469,26 +590,26 @@ namespace PulsarUI.ViewModels
                                         {
                                             remarksList.Remove(RunRemarks.Foul);
                                             run.Remarks = remarksList.ToArray();
-                                            try { _ = _mqttService.PublishMqtt($"pulsarui/remark/{lane}", $"Removed:Foul:{deltaNs}"); } catch { }
                                             LocalLog($"Removed RunRemarks.Foul for lane={lane} deltaNs={deltaNs}");
+                                            SyncRunRemark(runIndex, RunRemarks.Foul, false);
                                         }
                                     }
 
-                                    // Update the dedicated Remarks label
-                                    if (labels != null && labels.Count > 0)
+                                    // Persist the computed reaction time (raw decimal seconds) against this lane's
+                                    // run_indv row, now that it's known.
+                                    try
                                     {
-                                        var resultIndex = labels.ToList().FindIndex(l => string.Equals(l.Label, "Result", StringComparison.OrdinalIgnoreCase));
-                                        var remarksIndex = resultIndex >= 0 ? resultIndex + 1 : labels.ToList().FindIndex(l => string.Equals(l.Label, "Remarks", StringComparison.OrdinalIgnoreCase));
-                                        if (remarksIndex >= 0 && remarksIndex < labels.Count)
+                                        var indvId = _currentRunIndvIds.ElementAtOrDefault(runIndex);
+                                        if (indvId is { } id)
                                         {
-                                            var remarksText = (run.Remarks != null && run.Remarks.Length > 0)
-                                                ? string.Join(" | ", run.Remarks.Select(r => ((System.Enum)r).GetDisplayName()))
-                                                : string.Empty;
-                                            labels[remarksIndex].Value = remarksText;
-                                            try { _ = _mqttService.PublishMqtt($"pulsarui/remark/{lane}", $"LabelUpdated:{remarksText}"); } catch { }
-                                            LocalLog($"Updated Remarks label for lane={lane} remarks='{remarksText}'");
+                                            _ = _databaseService.UpdateRunIndvReactionTimeAsync(id, FormatRawSeconds(deltaNs));
                                         }
                                     }
+                                    catch (Exception ex) { LocalLog("Persist reaction_time failed: " + ex.Message); }
+
+                                    // Re-evaluate Winner/Lose (foul-based, or conventional first-finish fallback)
+                                    // and refresh the Remarks label for both lanes, since either can change.
+                                    RefreshWinnerLoseResult();
                                 }
                                 catch (Exception ex) { LocalLog("ReactionTimeComputed remarks update failed: " + ex.Message); }
 
@@ -514,13 +635,16 @@ namespace PulsarUI.ViewModels
                                 {
                                     LocalLog("Failed to publish reactiontime MQTT payload: " + ex.Message);
                                 }
+
+                                // A reaction time was just recorded for this lane - re-evaluate F9/Clear availability.
+                                UpdateButtonStatuses();
                             }
                         }
                         catch (Exception ex)
                         {
                             LocalLog("ReactionTimeComputed handler error: " + ex.Message);
                         }
-                    });
+                     });
                 };
 
                 // Subscribe to incremental time events for down-track inputs
@@ -568,14 +692,26 @@ namespace PulsarUI.ViewModels
                             {
                                 existing.ValueNs = computedIncNs;
                                 existing.Input = dti;
+                                existing.TimestampNanoseconds = downtrackTimestampNs;
                             }
                             else
                             {
-                                var newIt = new IncrementalTime { ValueNs = computedIncNs, Input = dti };
+                                var newIt = new IncrementalTime { ValueNs = computedIncNs, Input = dti, TimestampNanoseconds = downtrackTimestampNs };
                                 incList.Add(newIt);
                             }
 
                             run.IncrementalTimes = incList.ToArray();
+
+                            // Persist this incremental ET against the lane's run_indv row (upsert by distance).
+                            try
+                            {
+                                var indvIdForEt = _currentRunIndvIds.ElementAtOrDefault(runIndex);
+                                if (indvIdForEt is { } etId)
+                                {
+                                    _ = _databaseService.UpsertIncrementalEtAsync(etId, dti.DistanceMm, FormatRawSeconds(computedIncNs));
+                                }
+                            }
+                            catch (Exception ex) { LocalLog("Persist incremental_et failed: " + ex.Message); }
 
                             // Ensure IncrementalSpeeds list exists and update with computed speed
                             var speedList = run.IncrementalSpeeds?.ToList() ?? new System.Collections.Generic.List<IncrementalSpeed>();
@@ -594,6 +730,17 @@ namespace PulsarUI.ViewModels
                                     speedList.Add(newSp);
                                 }
                                 run.IncrementalSpeeds = speedList.ToArray();
+
+                                // Persist this incremental speed against the lane's run_indv row (upsert by distance).
+                                try
+                                {
+                                    var indvIdForSpeed = _currentRunIndvIds.ElementAtOrDefault(runIndex);
+                                    if (indvIdForSpeed is { } spId)
+                                    {
+                                        _ = _databaseService.UpsertIncrementalSpeedAsync(spId, dti.DistanceMm, FormatRawDecimal(speedVal));
+                                    }
+                                }
+                                catch (Exception ex) { LocalLog("Persist incremental_speed failed: " + ex.Message); }
                             }
 
                             // Update UI label corresponding to this DownTrackInput
@@ -646,6 +793,9 @@ namespace PulsarUI.ViewModels
 
                             // Incremental time and speed strings are now included in the timingdata/{lane}/incrementaltime
                             // JSON payload (incrementalString and speedString). Separate /string topic publishes are not required.
+
+                            // New incremental speed/ET (and possibly a finish ET) were just recorded - re-evaluate F9/Clear availability.
+                            UpdateButtonStatuses();
                         }
                         catch (Exception ex)
                         {
@@ -825,6 +975,17 @@ namespace PulsarUI.ViewModels
                         RunActive = true;
                         RunStartTimestampNanoseconds = tsNs;
                         MaybeDebug($"Run started: RunStartTimestampNanoseconds={tsNs}");
+
+                        // Persist run_pair + run_indv rows now that the run is active.
+                        // Fire-and-forget: never blocks/throws into this handler.
+                        try
+                        {
+                            PersistRunStartAsync(EngagedPairModel, EngagePairQueueCategory, FinishList, tsNs);
+                        }
+                        catch (Exception ex)
+                        {
+                            LocalLog("PersistRunStartAsync invocation failed: " + ex.Message);
+                        }
                     });
                 };
             }
@@ -854,6 +1015,7 @@ namespace PulsarUI.ViewModels
                                 {
                                     remarksList.Add(RunRemarks.NoVehicleStaged);
                                     run.Remarks = remarksList.ToArray();
+                                    SyncRunRemark(runIndex, RunRemarks.NoVehicleStaged, true);
                                 }
                             }
                             else
@@ -862,23 +1024,13 @@ namespace PulsarUI.ViewModels
                                 {
                                     remarksList.Remove(RunRemarks.NoVehicleStaged);
                                     run.Remarks = remarksList.ToArray();
+                                    SyncRunRemark(runIndex, RunRemarks.NoVehicleStaged, false);
                                 }
                             }
 
-                            // Update the dedicated Remarks label (always present) to reflect current remarks for that run
-                            var labels = runIndex == 0 ? LeftTimingLabels : RightTimingLabels;
-                            if (labels != null && labels.Count > 0)
-                            {
-                                var resultIndex = labels.ToList().FindIndex(l => string.Equals(l.Label, "Result", StringComparison.OrdinalIgnoreCase));
-                                var remarksIndex = resultIndex >= 0 ? resultIndex + 1 : labels.ToList().FindIndex(l => string.Equals(l.Label, "Remarks", StringComparison.OrdinalIgnoreCase));
-                                if (remarksIndex >= 0 && remarksIndex < labels.Count)
-                                {
-                                    var remarksText = (run.Remarks != null && run.Remarks.Length > 0)
-                                        ? string.Join(" | ", run.Remarks.Select(r => ((System.Enum)r).GetDisplayName()))
-                                        : string.Empty;
-                                    labels[remarksIndex].Value = remarksText;
-                                }
-                            }
+                            // Re-evaluate Winner/Lose (bye-run rule can now apply) and refresh
+                            // the Remarks label for both lanes, since either can change.
+                            RefreshWinnerLoseResult();
                         }
                         catch (Exception ex)
                         {
@@ -906,13 +1058,20 @@ namespace PulsarUI.ViewModels
                             var run = EngagedPairModel.Runs.ElementAtOrDefault(runIndex);
                             if (run == null) return;
 
+                            // Deep-stage fouls are only tracked when the engaged category has
+                            // DeepStageFoul enabled. Applies regardless of RunMode (Practice,
+                            // Qualifying, Eliminations, Q+E Combo) - the Winner/Lose consequence
+                            // (handled by EvaluateWinnerLoseResult) is what's scoped to Eliminations/QeCombo.
+                            bool categoryTracksDsFoul = EngagedPairModel.Category?.DeepStageFoul ?? false;
+
                             var remarksList = run.Remarks?.ToList() ?? new System.Collections.Generic.List<RunRemarks>();
-                            if (dsFoul)
+                            if (dsFoul && categoryTracksDsFoul)
                             {
                                 if (!remarksList.Contains(RunRemarks.DsFoul))
                                 {
                                     remarksList.Add(RunRemarks.DsFoul);
                                     run.Remarks = remarksList.ToArray();
+                                    SyncRunRemark(runIndex, RunRemarks.DsFoul, true);
                                 }
                             }
                             else
@@ -921,23 +1080,13 @@ namespace PulsarUI.ViewModels
                                 {
                                     remarksList.Remove(RunRemarks.DsFoul);
                                     run.Remarks = remarksList.ToArray();
+                                    SyncRunRemark(runIndex, RunRemarks.DsFoul, false);
                                 }
                             }
 
-                            // Update the dedicated Remarks label
-                            var labels = runIndex == 0 ? LeftTimingLabels : RightTimingLabels;
-                            if (labels != null && labels.Count > 0)
-                            {
-                                var resultIndex = labels.ToList().FindIndex(l => string.Equals(l.Label, "Result", StringComparison.OrdinalIgnoreCase));
-                                var remarksIndex = resultIndex >= 0 ? resultIndex + 1 : labels.ToList().FindIndex(l => string.Equals(l.Label, "Remarks", StringComparison.OrdinalIgnoreCase));
-                                if (remarksIndex >= 0 && remarksIndex < labels.Count)
-                                {
-                                    var remarksText = (run.Remarks != null && run.Remarks.Length > 0)
-                                        ? string.Join(" | ", run.Remarks.Select(r => ((System.Enum)r).GetDisplayName()))
-                                        : string.Empty;
-                                    labels[remarksIndex].Value = remarksText;
-                                }
-                            }
+                            // Re-evaluate Winner/Lose (a DsFoul lane loses outright; both lanes
+                            // having DsFoul means neither wins) and refresh both lanes' labels.
+                            RefreshWinnerLoseResult();
                         }
                         catch (Exception ex)
                         {
@@ -1053,6 +1202,8 @@ namespace PulsarUI.ViewModels
             _swapEngageCommandRef = SwapEngagedPairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
             // Capture AbortRun command ref so we can re-evaluate CanExecute when RunActive changes
             _abortRunCommandRef = AbortRunCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
+            // Capture Clear command ref so we can re-evaluate CanExecute as lane details change
+            _clearCommandRef = ClearCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
 
             // Keep handlers in sync if collection items are replaced or changed
             EnterRacers.CollectionChanged += (s, e) =>
@@ -1440,9 +1591,10 @@ namespace PulsarUI.ViewModels
             }
         }
 
-        [RelayCommand]
+        [RelayCommand(CanExecute = nameof(CanQueuePair))]
         private void QueuePair()
         {
+            if (!CanQueuePair()) return;
             var category = Categories?.Find(c => c?.Id == EnterPairQueueCategory.Category);
             if (category == null) return;
             QueuePairCategText = category.Name;
@@ -1528,9 +1680,71 @@ namespace PulsarUI.ViewModels
             UpdateButtonStatuses();
         }
 
-        [RelayCommand]
+        [RelayCommand(CanExecute = nameof(CanClear))]
+        private void Clear()
+        {
+            if (!CanClear()) return;
+
+            try
+            {
+                // Clear racer/index details for both engaged lanes and republish them.
+                for (int i = 0; i < EngagedRacers.Count; i++)
+                {
+                    EngagedRacers[i].ClearAll();
+                    try { _ = _mqttService.PubQueueRacersAsync(EngagedRacers[i]); } catch { }
+                }
+
+                var pair = EngagedPairModel ?? _lastEngagedPairModel;
+                var left = pair?.Runs?.ElementAtOrDefault(0);
+                var right = pair?.Runs?.ElementAtOrDefault(1);
+
+                ClearRunTimingDetails(left);
+                ClearRunTimingDetails(right);
+
+                // The just-cleared snapshot no longer has anything worth clearing.
+                _lastEngagedPairModel = null;
+
+                // Blank every on-screen timing label (Reaction Time, ET/speed traps, Result, Remarks) for both lanes.
+                foreach (var label in LeftTimingLabels) label.Value = string.Empty;
+                foreach (var label in RightTimingLabels) label.Value = string.Empty;
+
+                // Force republish of the (now empty) Result/Remarks even if they match a previously-cached empty state.
+                _lastPublishedResults.Clear();
+                _lastPublishedRemarks.Clear();
+                UpdateResultLabel(0, left);
+                UpdateResultLabel(1, right);
+                RefreshRemarksLabel(0, left);
+                RefreshRemarksLabel(1, right);
+
+                _mqttService.ClearDisplays();
+
+                UpdateButtonStatuses();
+            }
+            catch (Exception ex)
+            {
+                LocalLog("Clear error: " + ex.Message);
+            }
+        }
+
+        // Resets a single lane's collected timing data back to its pre-run state (Entry/racer
+        // details are cleared separately via EngagedRacers[i].ClearAll()).
+        private static void ClearRunTimingDetails(Run? run)
+        {
+            if (run == null) return;
+            run.Entry?.ClearAll();
+            run.ReactionTime = null;
+            run.IncrementalTimes = Array.Empty<IncrementalTime>();
+            run.IncrementalSpeeds = Array.Empty<IncrementalSpeed>();
+            run.Remarks = Array.Empty<RunRemarks>();
+            run.Results = Array.Empty<RunResult>();
+            run.FinishEtNs = null;
+            run.BreakoutDeltaNs = null;
+        }
+        
+        [RelayCommand(CanExecute = nameof(CanEngagePair))]
         private void EngagePair()
         {
+            if (!CanEngagePair()) return;
             bool queueHasEntries = QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
             for (int i = 0; i < EngagedRacers.Count; i++)
             {
@@ -1746,6 +1960,7 @@ namespace PulsarUI.ViewModels
             UpdateButtonStatuses();
             foreach (var racer in EngagedRacers)
                 racer.ClearAll();
+            _mqttService.ClearDisplays();
             UpdateButtonStatuses();
         }
 
@@ -1815,6 +2030,51 @@ namespace PulsarUI.ViewModels
             return SystemEngaged;
         }
 
+        // CanExecute for QueuePair (F5): block queuing a new pair from Enter while the
+        // queue slot already holds a populated pair. The queue must be cleared (F11) first.
+        private bool CanQueuePair()
+        {
+            return !QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
+        }
+        
+        // CanExecute for Clear (F9): only when no run is active, the system is disengaged, and
+        // at least one lane has collected timing details worth clearing (a result, a reaction
+        // time, a finish ET, or a finish speed). Falls back to _lastEngagedPairModel because
+        // EngagedPairModel is already nulled out by the time SystemEngaged goes false (see
+        // OnSystemEngagedChanged), which happens as part of normal run completion.
+        private bool CanClear()
+        {
+            if (RunActive || SystemEngaged) return false;
+
+            var pair = EngagedPairModel ?? _lastEngagedPairModel;
+            var left = pair?.Runs?.ElementAtOrDefault(0);
+            var right = pair?.Runs?.ElementAtOrDefault(1);
+            var hasLaneDetails = RunHasDetails(left) || RunHasDetails(right);
+            return hasLaneDetails;
+        }
+
+        // True if this lane's run has a result, a reaction time, a finish ET, or a finish speed.
+        // Note: run.ReactionTime is non-null as soon as a pair is engaged (PopulateExpectedReactionTimes
+        // eagerly creates it just to hold ExpectedReactionTimeNs for display), so a non-null check alone
+        // would incorrectly report "has details" before any real reaction has actually been recorded -
+        // ValueNs is only ever set once a real reaction time arrives (see the ReactionTimeComputed handler).
+        private static bool RunHasDetails(Run? run)
+        {
+            if (run == null) return false;
+            bool hasResult = run.Results is { Length: > 0 };
+            bool hasReactionTime = run.ReactionTime != null && run.ReactionTime.ValueNs != 0;
+            bool hasFinishEt = run.FinishEtNs.HasValue;
+            bool hasFinishSpeed = run.IncrementalSpeeds is { Length: > 0 };
+            return hasResult || hasReactionTime || hasFinishEt || hasFinishSpeed;
+        }
+
+        // CanExecute for EngagePair (F10): block engaging while a run is active or the
+        // system is already engaged. Must wait for RunActive/SystemEngaged to clear first.
+        private bool CanEngagePair()
+        {
+            return !RunActive && !SystemEngaged;
+        }
+
         // Command to enable/disable the Setup UI (bound to F7 in XAML).
         // Generated RelayCommand will produce a SetupEnableCommand ICommand property.
         [RelayCommand]
@@ -1835,9 +2095,13 @@ namespace PulsarUI.ViewModels
                 if (!RunActive) return;
                 if (EngagedPairModel?.Runs == null) return;
 
-                for (int i = 0; i < EngagedPairModel.Runs.Length; i++)
+                // Capture the pair before SystemEngaged=false nulls EngagedPairModel below,
+                // so the run_pair completion update below still has a valid reference.
+                var pair = EngagedPairModel;
+
+                for (int i = 0; i < pair.Runs.Length; i++)
                 {
-                    var run = EngagedPairModel.Runs.ElementAtOrDefault(i);
+                    var run = pair.Runs.ElementAtOrDefault(i);
                     if (run == null) continue;
 
                     // Skip lanes explicitly marked as NoVehicleStaged
@@ -1849,27 +2113,16 @@ namespace PulsarUI.ViewModels
                     {
                         remarksList.Add(RunRemarks.Aborted);
                         run.Remarks = remarksList.ToArray();
+                        SyncRunRemark(i, RunRemarks.Aborted, true);
 
-                        var lane = i == 0 ? "left" : "right";
-                        try { _ = _mqttService.PublishMqtt($"pulsarui/remark/{lane}", "Added:Aborted"); } catch { }
-
-                        // Update Remarks label in UI
-                        var labels = i == 0 ? LeftTimingLabels : RightTimingLabels;
-                        if (labels != null && labels.Count > 0)
-                        {
-                            var resultIndex = labels.ToList().FindIndex(l => string.Equals(l.Label, "Result", StringComparison.OrdinalIgnoreCase));
-                            var remarksIndex = resultIndex >= 0 ? resultIndex + 1 : labels.ToList().FindIndex(l => string.Equals(l.Label, "Remarks", StringComparison.OrdinalIgnoreCase));
-                            if (remarksIndex >= 0 && remarksIndex < labels.Count)
-                            {
-                                var remarksText = (run.Remarks != null && run.Remarks.Length > 0)
-                                    ? string.Join(" | ", run.Remarks.Select(r => ((System.Enum)r).GetDisplayName()))
-                                    : string.Empty;
-                                labels[remarksIndex].Value = remarksText;
-                                try { _ = _mqttService.PublishMqtt($"pulsarui/remark/{lane}", $"LabelUpdated:{remarksText}"); } catch { }
-                            }
-                        }
+                        // Update Remarks label in UI and publish each remark on MQTT.
+                        RefreshRemarksLabel(i, run);
                     }
                 }
+
+                // Persist whatever first_lane/winner_lane state exists (typically both still
+                // null for an aborted run) against the run_pair row created when the run went active.
+                PersistRunPairCompletion(pair);
 
                 // Mark run inactive; do not change SystemEngaged per your instruction
                 RunActive = false;
@@ -2109,6 +2362,7 @@ namespace PulsarUI.ViewModels
                 OnPropertyChanged(nameof(IsF6Enabled));
                 OnPropertyChanged(nameof(IsF7Enabled));
                 OnPropertyChanged(nameof(IsF8Enabled));
+                OnPropertyChanged(nameof(IsF9Enabled));
                 OnPropertyChanged(nameof(IsF10Enabled));
                 OnPropertyChanged(nameof(IsF11Enabled));
 
@@ -2120,6 +2374,7 @@ namespace PulsarUI.ViewModels
                 _swapEngageCommandRef?.NotifyCanExecuteChanged();
                 _abortRunCommandRef?.NotifyCanExecuteChanged();
                 _startCommandRef?.NotifyCanExecuteChanged();
+                _clearCommandRef?.NotifyCanExecuteChanged();
             }
             catch { }
         }
@@ -2127,11 +2382,12 @@ namespace PulsarUI.ViewModels
         // Expose a few convenience boolean properties used by XAML bindings (conservative defaults)
         public bool IsF3Enabled => true; // Reset engage pair
         public bool IsF4Enabled => true; // Swap engaged pair
-        public bool IsF5Enabled => true; // Queue
+        public bool IsF5Enabled => CanQueuePair(); // Queue
         public bool IsF6Enabled => SystemEngaged; // Start
         public bool IsF7Enabled => true; // Setup
         public bool IsF8Enabled => RunActive; // Abort
-        public bool IsF10Enabled => true; // Engage
+        public bool IsF9Enabled => CanClear(); // Clear
+        public bool IsF10Enabled => CanEngagePair(); // Engage
         public bool IsF11Enabled => true; // Clear
 
         // Async loaders for finishes/trees/categories: load from database service and set properties
@@ -2183,6 +2439,297 @@ namespace PulsarUI.ViewModels
             }
         }
 
+        // Remembers the last-published Remarks/Results content per lane (keyed by "left"/"right"),
+        // so PublishLaneValues can skip re-publishing when nothing has actually changed - e.g.
+        // EvaluateWinnerLoseResult/UpdateResultLabel/RefreshRemarksLabel are called every second
+        // by the breakout-check timer (and on every other refresh) regardless of whether the
+        // underlying Remarks/Results actually changed since last time.
+        private readonly Dictionary<string, RunResult[]> _lastPublishedResults = new();
+        private readonly Dictionary<string, RunRemarks[]> _lastPublishedRemarks = new();
+
+        // Order-independent content equality for small Remarks/Results arrays.
+        private static bool SameValues<T>(T[]? a, T[]? b) where T : struct, Enum
+        {
+            var x = a ?? Array.Empty<T>();
+            var y = b ?? Array.Empty<T>();
+            if (x.Length != y.Length) return false;
+            foreach (var v in x) if (!y.Contains(v)) return false;
+            foreach (var v in y) if (!x.Contains(v)) return false;
+            return true;
+        }
+
+        // Update the dedicated "Result" timing label for a lane to reflect its Run.Results, if any.
+        // Results are not mutually exclusive (e.g. a run can be both FirstFinish and Lose), so
+        // all current entries are joined, the same way the "Remarks" label joins Run.Remarks.
+        // Publish each current remark/result value for a lane as its own plain-text MQTT
+        // payload on timingdata/{lane}/remark or timingdata/{lane}/result (one publish per
+        // value, using its display name, e.g. "Breakout", "Winner"), but only when the
+        // collection's content actually changed since the last publish for that lane/kind -
+        // otherwise this would resend the same batch every time this is refreshed (e.g. once a
+        // second, from the breakout-check timer, until both lanes finish). If the array is
+        // empty, publishes a single empty payload so subscribers can detect the cleared state.
+        private void PublishLaneValues<T>(string lane, string kind, T[]? values, Dictionary<string, T[]> lastPublished) where T : struct, Enum
+        {
+            try
+            {
+                var current = values ?? Array.Empty<T>();
+                if (lastPublished.TryGetValue(lane, out var previous) && SameValues(previous, current))
+                {
+                    return; // unchanged - nothing to publish
+                }
+                lastPublished[lane] = current;
+
+                var topic = $"timingdata/{lane}/{kind}";
+                if (current.Length == 0)
+                {
+                    _ = _mqttService.PublishMqtt(topic, string.Empty);
+                    return;
+                }
+                foreach (var value in current)
+                {
+                    _ = _mqttService.PublishMqtt(topic, ((Enum)(object)value).GetDisplayName());
+                }
+            }
+            catch (Exception ex)
+            {
+                LocalLog($"PublishLaneValues error ({kind}/{lane}): " + ex.Message);
+            }
+        }
+
+        private void UpdateResultLabel(int runIndex, Run? run)
+        {
+            try
+            {
+                if (run == null) return;
+                var labels = runIndex == 0 ? LeftTimingLabels : RightTimingLabels;
+                if (labels == null || labels.Count == 0) return;
+                var resultIndex = labels.ToList().FindIndex(l => string.Equals(l.Label, "Result", StringComparison.OrdinalIgnoreCase));
+                if (resultIndex >= 0 && resultIndex < labels.Count)
+                {
+                    var resultText = (run.Results != null && run.Results.Length > 0)
+                        ? string.Join(" | ", run.Results.Select(r => ((System.Enum)r).GetDisplayName()))
+                        : string.Empty;
+                    labels[resultIndex].Value = resultText;
+                    var lane = runIndex == 0 ? "left" : "right";
+                    PublishLaneValues(lane, "result", run.Results, _lastPublishedResults);
+                }
+            }
+            catch (Exception ex)
+            {
+                LocalLog("UpdateResultLabel error: " + ex.Message);
+            }
+        }
+
+        // Add a RunResult entry to a run's Results array if not already present (idempotent).
+        private static void AddRunResult(Run run, RunResult value)
+        {
+            var list = run.Results?.ToList() ?? new System.Collections.Generic.List<RunResult>();
+            if (!list.Contains(value))
+            {
+                list.Add(value);
+                run.Results = list.ToArray();
+            }
+        }
+
+        // Remove a RunResult entry from a run's Results array if present (idempotent).
+        private static void RemoveRunResult(Run run, RunResult value)
+        {
+            var list = run.Results?.ToList() ?? new System.Collections.Generic.List<RunResult>();
+            if (list.Contains(value))
+            {
+                list.Remove(value);
+                run.Results = list.ToArray();
+            }
+        }
+
+        // Refresh the "Remarks" timing label for a lane from its current Run.Remarks,
+        // and publish each current remark as its own plain-text MQTT payload.
+        private void RefreshRemarksLabel(int runIndex, Run? run)
+        {
+            try
+            {
+                if (run == null) return;
+                var labels = runIndex == 0 ? LeftTimingLabels : RightTimingLabels;
+                if (labels == null || labels.Count == 0) return;
+                var resultIndex = labels.ToList().FindIndex(l => string.Equals(l.Label, "Result", StringComparison.OrdinalIgnoreCase));
+                var remarksIndex = resultIndex >= 0 ? resultIndex + 1 : labels.ToList().FindIndex(l => string.Equals(l.Label, "Remarks", StringComparison.OrdinalIgnoreCase));
+                if (remarksIndex >= 0 && remarksIndex < labels.Count)
+                {
+                    var remarksText = (run.Remarks != null && run.Remarks.Length > 0)
+                        ? string.Join(" | ", run.Remarks.Select(r => ((System.Enum)r).GetDisplayName()))
+                        : string.Empty;
+                    labels[remarksIndex].Value = remarksText;
+                    var lane = runIndex == 0 ? "left" : "right";
+                    PublishLaneValues(lane, "remark", run.Remarks, _lastPublishedRemarks);
+                }
+            }
+            catch (Exception ex)
+            {
+                LocalLog("RefreshRemarksLabel error: " + ex.Message);
+            }
+        }
+
+        // ============================================================
+        // Run persistence (run_pair / run_indv / incremental_et /
+        // incremental_speed / run_remark) helpers
+        // ============================================================
+
+        // Formats a nanosecond duration as raw decimal seconds text (invariant culture,
+        // trimmed trailing zeros, no unit suffix, no forced sign) - preserves the exact
+        // decimal representation rather than the UI's resolution-rounded display string.
+        private static string FormatRawSeconds(long ns) =>
+            (ns / 1_000_000_000m).ToString("0.#########", CultureInfo.InvariantCulture);
+
+        private static string FormatRawDecimal(decimal value) =>
+            value.ToString("0.#########", CultureInfo.InvariantCulture);
+
+        // Inserts the run_pair row and both run_indv rows for the pair that just became
+        // active, storing the returned ids in _currentRunPairId/_currentRunIndvIds so later
+        // events (reaction time, incremental readings, remarks, completion) can reference
+        // them. Fire-and-forget from the RunStartReceived handler; never throws.
+        private async void PersistRunStartAsync(Pair? pair, CategQueueItem? engagedCategory, List<FinishLine>? finishList, long runStartTimestampNs)
+        {
+            try
+            {
+                if (pair?.Category == null || pair.Runs == null || pair.Runs.Length < 2)
+                {
+                    LocalLog("PersistRunStartAsync: skipped - pair or category not available");
+                    return;
+                }
+
+                var category = pair.Category;
+
+                int finishDistanceMm = 0;
+                if (engagedCategory != null && finishList != null)
+                {
+                    var fl = finishList.FirstOrDefault(f => f != null && f.Id == engagedCategory.Finish);
+                    if (fl != null) finishDistanceMm = fl.Distance;
+                }
+
+                var isoTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(runStartTimestampNs / 1_000_000L)
+                    .ToUniversalTime().ToString("o");
+
+                var runPairRecord = new RunPairInsert
+                {
+                    RunTimestamp = isoTimestamp,
+                    CategoryId = category.Id,
+                    RaceMode = (int)(pair.RunMode ?? RunMode.Practice),
+                    RoundNumber = engagedCategory?.Round,
+                    StartMode = category.StartMode,
+                    FinishDistance = finishDistanceMm,
+                    RunTimeout = category.RunTimeout,
+                    StageFreeze = category.StageFreeze,
+                    DsFoul = category.DeepStageFoul,
+                    WorstFoul = category.WorstFoul,
+                    TreeDelay = null,
+                    AsSettle = category.StageSettle,
+                    AsStageToStart = category.AutoStartStageToStart,
+                    AsVariance = category.AutoStartVariance,
+                    AsTimeout = category.AutoStartTimeout
+                };
+
+                var pairId = await _databaseService.InsertRunPairAsync(runPairRecord);
+                if (pairId == null)
+                {
+                    LocalLog("PersistRunStartAsync: InsertRunPairAsync failed, persistence disabled for this run");
+                    return;
+                }
+
+                _currentRunPairId = pairId;
+
+                for (int i = 0; i < 2; i++)
+                {
+                    var run = pair.Runs.ElementAtOrDefault(i);
+                    var entry = run?.Entry;
+
+                    long? racerId = null;
+                    try
+                    {
+                        racerId = await _databaseService.ResolveRacerIdAsync(category.Id, entry?.RaceNumber);
+                    }
+                    catch (Exception ex)
+                    {
+                        LocalLog("PersistRunStartAsync: ResolveRacerIdAsync failed: " + ex.Message);
+                    }
+
+                    var treeType = entry?.Tree?.Id ?? category.TreeType;
+
+                    var indvRecord = new RunIndvInsert
+                    {
+                        PairId = pairId.Value,
+                        RacerId = racerId,
+                        Lane = entry?.Lane ?? i,
+                        RaceNumber = entry?.RaceNumber,
+                        IndexTime = entry?.HandicapIndex,
+                        TreeType = treeType
+                    };
+
+                    var indvId = await _databaseService.InsertRunIndvAsync(indvRecord);
+                    _currentRunIndvIds[i] = indvId;
+                    if (indvId == null)
+                    {
+                        LocalLog($"PersistRunStartAsync: InsertRunIndvAsync failed for lane={i}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LocalLog("PersistRunStartAsync error: " + ex.Message);
+            }
+        }
+
+        // Inserts or deletes a run_remark row to mirror a Run.Remarks add/remove, keyed off
+        // the in-memory run_indv id for that lane. No-ops silently if persistence isn't
+        // available for the current run (id not yet known / insert failed).
+        private void SyncRunRemark(int runIndex, RunRemarks remark, bool present)
+        {
+            var id = _currentRunIndvIds.ElementAtOrDefault(runIndex);
+            if (id is not { } runIndvId) return;
+
+            if (present)
+                _ = _databaseService.InsertRunRemarkAsync(runIndvId, (int)remark);
+            else
+                _ = _databaseService.DeleteRunRemarkAsync(runIndvId, (int)remark);
+        }
+
+        // Updates run_pair.first_lane/winner_lane from the pair's current Results once the
+        // pair completes or is aborted. No-ops if persistence isn't available for this run.
+        private void PersistRunPairCompletion(Pair? pair)
+        {
+            if (_currentRunPairId is not { } pairId || pair?.Runs == null) return;
+
+            int? firstLane = null;
+            int? winnerLane = null;
+            for (int i = 0; i < pair.Runs.Length; i++)
+            {
+                var r = pair.Runs[i];
+                if (r?.Results?.Contains(RunResult.FirstFinish) == true) firstLane = i;
+                if (r?.Results?.Contains(RunResult.Winner) == true) winnerLane = i;
+            }
+
+            _ = _databaseService.UpdateRunPairResultAsync(pairId, firstLane, winnerLane);
+        }
+
+        // Re-evaluate Winner/Lose (RunResult entries) for the engaged pair and refresh both
+        // lanes' Result labels. Also refreshes both lanes' Remarks labels, since this is called
+        // immediately whenever a remark that can affect the decision (Foul, NoVehicleStaged) is
+        // received/toggled - Foul (and any other remark) must be reflected on screen the moment
+        // it's received, not only once something else happens to touch the labels later.
+        private void RefreshWinnerLoseResult(long? nowNs = null)
+        {
+            try { PulsarUI.Services.TimingHelpers.EvaluateWinnerLoseResult(EngagedPairModel, nowNs); }
+            catch (Exception ex) { LocalLog("EvaluateWinnerLoseResult error: " + ex.Message); }
+            var left = EngagedPairModel?.Runs?.ElementAtOrDefault(0);
+            var right = EngagedPairModel?.Runs?.ElementAtOrDefault(1);
+            UpdateResultLabel(0, left);
+            UpdateResultLabel(1, right);
+            RefreshRemarksLabel(0, left);
+            RefreshRemarksLabel(1, right);
+
+            // Results may have just changed - re-evaluate F9/Clear availability.
+            UpdateButtonStatuses();
+        }
+
         // Check completion conditions for a run and, when finished, optionally set RunActive=false and log run to a file
         private void MaybeCheckAndCompleteRun(int runIndex, int finishDistanceMm, Run run)
         {
@@ -2195,6 +2742,8 @@ namespace PulsarUI.ViewModels
 
                 // Determine if this run has a timing at the finish (in IncrementalTimes) or a result time
                 var hasFinishTime = false;
+                long finishTimestampNs = 0;
+                long finishEtNs = 0;
 
                 if (run.IncrementalTimes != null && run.IncrementalTimes.Length > 0)
                 {
@@ -2203,6 +2752,8 @@ namespace PulsarUI.ViewModels
                         if (it?.Input?.DistanceMm == finishDistanceMm && it.ValueNs > 0)
                         {
                             hasFinishTime = true;
+                            finishTimestampNs = it.TimestampNanoseconds;
+                            finishEtNs = it.ValueNs;
                             break;
                         }
                     }
@@ -2214,14 +2765,36 @@ namespace PulsarUI.ViewModels
 
                 if (!hasFinishTime) return;
 
+                // Record this lane's own finish ET (duration, ns) - the canonical,
+                // order-independent "this lane has finished" signal, used both by
+                // breakout evaluation and by EvaluateWinnerLoseResult to gate the
+                // Winner/Lose decision (as opposed to RunResult.FirstFinish below,
+                // which may now be assigned early/tentatively for display purposes).
+                run.FinishEtNs = finishEtNs;
+
+                try
+                {
+                    PulsarUI.Services.TimingHelpers.EvaluateBreakoutRemark(run, EngagedPairModel?.RunMode, EngagedPairModel?.Category, finishEtNs, out var breakoutChanged, out var isBreakoutNow);
+                    if (breakoutChanged)
+                    {
+                        SyncRunRemark(runIndex, RunRemarks.Breakout, isBreakoutNow);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LocalLog("EvaluateBreakoutRemark error: " + ex.Message);
+                }
+
                 // A finish time exists for this lane. If the other lane either has a finish or is NoVehicleStaged,
                 // then conclude the pair and mark RunActive false and log the pair.
                 bool otherLaneFinished = true;
                 bool otherLaneNoVehicle = false;
+                Run? other = null;
+                int otherIndex = runIndex == 0 ? 1 : 0;
+                long otherFinishTimestampNs = 0;
                 if (EngagedPairModel?.Runs != null)
                 {
-                    int otherIndex = runIndex == 0 ? 1 : 0;
-                    var other = EngagedPairModel.Runs.ElementAtOrDefault(otherIndex);
+                    other = EngagedPairModel.Runs.ElementAtOrDefault(otherIndex);
                     if (other != null)
                     {
                         otherLaneNoVehicle = other.Remarks?.Contains(RunRemarks.NoVehicleStaged) ?? false;
@@ -2234,12 +2807,89 @@ namespace PulsarUI.ViewModels
                                 if (it2?.Input?.DistanceMm == finishDistanceMm && it2.ValueNs > 0)
                                 {
                                     otherLaneFinished = true;
+                                    otherFinishTimestampNs = it2.TimestampNanoseconds;
                                     break;
                                 }
                             }
                         }
                     }
                 }
+
+                bool thisLaneNoVehicle = run.Remarks?.Contains(RunRemarks.NoVehicleStaged) ?? false;
+
+                // Assign "first to the stripe" (RunResult.FirstFinish) as soon as it can be
+                // established, for on-screen display - the instant THIS lane's own finish
+                // arrives, if the other lane hasn't finished yet, this lane is tentatively
+                // first. Once the other lane's own finish later arrives (its own call to
+                // this method), the comparison is redone from the actual hardware finish
+                // timestamps and will correct/confirm/swap the decision (e.g. if the other
+                // lane's MQTT message was merely delayed in transit but its real hardware
+                // timestamp turns out earlier). This block is NOT gated on "already
+                // decided" - it fully recomputes every time either lane's own finish
+                // arrives. NOTE: this only controls the FirstFinish *display* tag - the
+                // overall Winner/Lose decision in EvaluateWinnerLoseResult is separately
+                // and still correctly gated on BOTH lanes' Run.FinishEtNs being known, so
+                // awarding this tag early does not award the run early.
+                if (!thisLaneNoVehicle && !otherLaneNoVehicle && finishTimestampNs > 0)
+                {
+                    try
+                    {
+                        if (!otherLaneFinished || otherFinishTimestampNs <= 0)
+                        {
+                            // Only this lane has finished so far - tentatively first.
+                            AddRunResult(run, RunResult.FirstFinish);
+                            RemoveRunResult(run, RunResult.Indeterminate);
+                            if (other != null)
+                            {
+                                RemoveRunResult(other, RunResult.FirstFinish);
+                                RemoveRunResult(other, RunResult.Indeterminate);
+                            }
+                        }
+                        else if (finishTimestampNs == otherFinishTimestampNs)
+                        {
+                            RemoveRunResult(run, RunResult.FirstFinish);
+                            AddRunResult(run, RunResult.Indeterminate);
+                            if (other != null)
+                            {
+                                RemoveRunResult(other, RunResult.FirstFinish);
+                                AddRunResult(other, RunResult.Indeterminate);
+                            }
+                            LocalLog($"MaybeCheckAndCompleteRun: finish-line tie at {finishTimestampNs}ns; both runs marked Indeterminate.");
+                        }
+                        else if (finishTimestampNs < otherFinishTimestampNs)
+                        {
+                            AddRunResult(run, RunResult.FirstFinish);
+                            RemoveRunResult(run, RunResult.Indeterminate);
+                            if (other != null)
+                            {
+                                RemoveRunResult(other, RunResult.FirstFinish);
+                                RemoveRunResult(other, RunResult.Indeterminate);
+                            }
+                        }
+                        else
+                        {
+                            RemoveRunResult(run, RunResult.FirstFinish);
+                            RemoveRunResult(run, RunResult.Indeterminate);
+                            if (other != null)
+                            {
+                                AddRunResult(other, RunResult.FirstFinish);
+                                RemoveRunResult(other, RunResult.Indeterminate);
+                            }
+                        }
+
+                        UpdateResultLabel(runIndex, run);
+                        if (other != null) UpdateResultLabel(otherIndex, other);
+                    }
+                    catch (Exception ex)
+                    {
+                        LocalLog("MaybeCheckAndCompleteRun: failed to assign First-finish result: " + ex.Message);
+                    }
+                }
+
+                // Re-evaluate Winner/Lose every time we check for completion: picks up the
+                // conventional first-finish win as soon as RunResult.FirstFinish is assigned
+                // above (foul-based decisions, evaluated earlier in the run, always take priority).
+                RefreshWinnerLoseResult();
 
                 if (otherLaneFinished || otherLaneNoVehicle)
                 {
@@ -2257,6 +2907,18 @@ namespace PulsarUI.ViewModels
                     catch (Exception ex)
                     {
                         LocalLog("MaybeCheckAndCompleteRun: failed to write run log: " + ex.Message);
+                    }
+
+                    // Persist first_lane/winner_lane against the run_pair row created when the
+                    // run went active. Captured before SystemEngaged=false (below) nulls
+                    // EngagedPairModel.
+                    try
+                    {
+                        PersistRunPairCompletion(EngagedPairModel);
+                    }
+                    catch (Exception ex)
+                    {
+                        LocalLog("MaybeCheckAndCompleteRun: PersistRunPairCompletion failed: " + ex.Message);
                     }
 
                     // Build and publish timingdata/complete payload

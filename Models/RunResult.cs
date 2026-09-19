@@ -9,6 +9,8 @@ namespace PulsarUI.Models
         [Description("First")]
         FirstFinish,
         [Description("Winner")]
-        Winner
+        Winner,
+        [Description("Indeterminate")]
+        Indeterminate
     }
 }

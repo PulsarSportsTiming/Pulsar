@@ -132,6 +132,7 @@ namespace PulsarUI.Services
             "inputs/status",
             "inputs/timestamps",
             "startline/runstart",
+            "treeserver/run/events",
             "lanestart/#",
             "apibridge/competitors",
             "apibridge/bumpspot",
@@ -252,6 +253,14 @@ namespace PulsarUI.Services
             }
         }
 
+        // Sends the clear command for public display clients e.g. scoreboards
+        public Task ClearDisplays()
+        {
+            const string payload = "1";
+            const string topic = $"timingdata/clear";
+            return PublishMqtt(topic, payload);
+        }
+        
         // Publishes reaction time JSON to timingdata/{lane}/reactiontime with detection source
         private Task PublishReactionTimeAsync(string lane, long reactionTimeNs, Guid runId, string detectionSource)
         {
@@ -1262,6 +1271,7 @@ namespace PulsarUI.Services
             _topicHandlers["inputs/status"] = (topic, payload) => HandleInputsStatusAsync(payload);
             _topicHandlers["inputs/timestamps"] = (topic, payload) => HandleInputTimestampsAsync(payload);
             _topicHandlers["startline/runstart"] = (topic, payload) => HandleStartLineRunStartAsync(payload);
+            _topicHandlers["treeserver/run/events"] = (topic, payload) => HandleTreeServerRunEventsAsync(payload);
             _topicHandlers["lanestart/"] = (topic, payload) => HandleLaneStartSourceAsync(topic, payload);
             _topicHandlers["apibridge/competitors"] = (topic, payload) => HandleApiCompetitorsAsync(payload);
             _topicHandlers["apibridge/bumpspot"] = (topic, payload) => HandleApiBumpSpotAsync(payload);
@@ -1367,6 +1377,15 @@ namespace PulsarUI.Services
                                 AppendLog($"HandleStartLineRunStartAsync: lane={laneKey} set NoVehicle=false");
                             }
                         }
+                        // Notify subscribers (ViewModel) that NoVehicle has changed for this lane
+                        try
+                        {
+                            LaneNoVehicleChanged?.Invoke(laneKey, noVehicle);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLog("LaneNoVehicleChanged handler threw: " + ex.Message);
+                        }
                         // Notify subscribers (ViewModel) that DSFoul has changed for this lane
                         try
                         {
@@ -1385,6 +1404,189 @@ namespace PulsarUI.Services
                 AppendLog("HandleStartLineRunStartAsync parse error: " + ex.Message);
             }
             return Task.CompletedTask;
+        }
+
+        // Handle treeserver/run/events messages. Two event values are currently acted upon:
+        // "run_start" and "lane_fault"; other event values are silently ignored (logged only).
+        //
+        // run_start example: {"event":"run_start","runMicros":1401524107,"info":"L=0,R=1"}
+        // The "info" field encodes per-lane staged status as "L=<0|1>,R=<0|1>" where 0 means
+        // no vehicle was staged in that lane and 1 means a vehicle is staged. Only lanes
+        // reported as 0 are acted upon here (NoVehicle is set and NoVehicleStaged is raised);
+        // lanes reported as 1 are left untouched — stale NoVehicle state is cleared elsewhere,
+        // once per newly engaged system/pair, via ResetLaneNoVehicleFlags().
+        //
+        // lane_fault example: {"event":"lane_fault","runMicros":1385738990,"info":"right_deep_stage_no_prestage"}
+        // The "info" field encodes "<lane>_<faultType>" where lane is "left"/"right" and
+        // faultType is a snake_case description. Fault types starting with "deep_stage" are
+        // treated as a deep-stage foul and raise LaneDsFoulChanged(lane, true) (consumed by
+        // MainWindowViewModel, which only records it as RunRemarks.DsFoul when the engaged
+        // category has DeepStageFoul enabled). Other fault types are logged but not yet acted upon.
+        private Task HandleTreeServerRunEventsAsync(string payload)
+        {
+            AppendLog($"HandleTreeServerRunEventsAsync: {payload}");
+            if (string.IsNullOrWhiteSpace(payload)) return Task.CompletedTask;
+            try
+            {
+                using var doc = JsonDocument.Parse(payload);
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object) return Task.CompletedTask;
+
+                string? eventName = null;
+                if (root.TryGetProperty("event", out var evEl) && evEl.ValueKind == JsonValueKind.String)
+                    eventName = evEl.GetString();
+
+                string? info = null;
+                if (root.TryGetProperty("info", out var infoEl) && infoEl.ValueKind == JsonValueKind.String)
+                    info = infoEl.GetString();
+
+                if (string.Equals(eventName, "run_start", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleTreeServerRunStartEvent(info);
+                }
+                else if (string.Equals(eventName, "lane_fault", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleTreeServerLaneFaultEvent(info);
+                }
+                else
+                {
+                    AppendLog($"HandleTreeServerRunEventsAsync: unhandled event '{eventName}'; ignoring");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("HandleTreeServerRunEventsAsync parse error: " + ex.Message);
+            }
+            return Task.CompletedTask;
+        }
+
+        private void HandleTreeServerRunStartEvent(string? info)
+        {
+            if (string.IsNullOrWhiteSpace(info))
+            {
+                AppendLog("HandleTreeServerRunEventsAsync: run_start event missing 'info'; ignoring");
+                return;
+            }
+
+            // Parse "L=0,R=1" style info string into a per-lane staged flag.
+            foreach (var part in info.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var kv = part.Split('=', 2);
+                if (kv.Length != 2) continue;
+
+                var key = kv[0].Trim();
+                var valStr = kv[1].Trim();
+                if (!int.TryParse(valStr, out var val)) continue;
+
+                string? laneKey = key.Equals("L", StringComparison.OrdinalIgnoreCase) ? "left"
+                    : key.Equals("R", StringComparison.OrdinalIgnoreCase) ? "right"
+                    : null;
+                if (laneKey == null) continue;
+
+                // Only act when the lane has no vehicle staged (0). Staged lanes (1) are
+                // intentionally left untouched here.
+                if (val != 0) continue;
+
+                var buf = GetBufferForLane(laneKey);
+                lock (buf)
+                {
+                    buf.NoVehicle = true;
+                    // Clear any detection/published markers so nothing is recorded for this lane
+                    buf.LastPublishedRunId = Guid.Empty;
+                    buf.DetectionTimestampNs = null;
+                    buf.TrapStartTimestamps.Clear();
+                    buf.TrapEndTimestamps.Clear();
+                    buf.SeenDowntrackInputs.Clear();
+                    buf.LastDowntrackDistanceMm = null;
+                    buf.LastDowntrackTimestampNs = null;
+                    buf.GuardA.Clear();
+                    buf.GuardB.Clear();
+                    buf.StageEvents.Clear();
+                    AppendLog($"HandleTreeServerRunEventsAsync: lane={laneKey} set NoVehicle=true (no vehicle staged) — cleared buffers");
+                }
+
+                try
+                {
+                    LaneNoVehicleChanged?.Invoke(laneKey, true);
+                }
+                catch (Exception ex)
+                {
+                    AppendLog("LaneNoVehicleChanged handler threw: " + ex.Message);
+                }
+            }
+        }
+
+        // Parse a "lane_fault" event's "info" field, formatted as "<lane>_<faultType>"
+        // (e.g. "right_deep_stage_no_prestage"). Only faultType values starting with
+        // "deep_stage" are currently acted upon (raising LaneDsFoulChanged); other fault
+        // types are logged for visibility but otherwise ignored for now.
+        private void HandleTreeServerLaneFaultEvent(string? info)
+        {
+            if (string.IsNullOrWhiteSpace(info))
+            {
+                AppendLog("HandleTreeServerRunEventsAsync: lane_fault event missing 'info'; ignoring");
+                return;
+            }
+
+            string? laneKey = null;
+            string? faultType = null;
+            if (info.StartsWith("left_", StringComparison.OrdinalIgnoreCase))
+            {
+                laneKey = "left";
+                faultType = info.Substring("left_".Length);
+            }
+            else if (info.StartsWith("right_", StringComparison.OrdinalIgnoreCase))
+            {
+                laneKey = "right";
+                faultType = info.Substring("right_".Length);
+            }
+
+            if (laneKey == null || string.IsNullOrWhiteSpace(faultType))
+            {
+                AppendLog($"HandleTreeServerRunEventsAsync: lane_fault info '{info}' did not match '<left|right>_<faultType>'; ignoring");
+                return;
+            }
+
+            if (faultType.StartsWith("deep_stage", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLog($"HandleTreeServerRunEventsAsync: lane_fault lane={laneKey} faultType={faultType} -> deep-stage foul");
+                try
+                {
+                    LaneDsFoulChanged?.Invoke(laneKey, true);
+                }
+                catch (Exception ex)
+                {
+                    AppendLog("LaneDsFoulChanged handler threw: " + ex.Message);
+                }
+            }
+            else
+            {
+                AppendLog($"HandleTreeServerRunEventsAsync: lane_fault lane={laneKey} faultType={faultType} not yet handled; ignoring");
+            }
+        }
+
+        // Reset any per-lane "no vehicle" state. Intended to be called once per newly engaged
+        // system/pair (e.g. when the operator starts a new run attempt) so a stale NoVehicle
+        // flag from a previous attempt can never leak into the new one.
+        public void ResetLaneNoVehicleFlags()
+        {
+            foreach (var lane in new[] { "left", "right" })
+            {
+                var buf = GetBufferForLane(lane);
+                lock (buf)
+                {
+                    buf.NoVehicle = false;
+                }
+
+                try
+                {
+                    LaneNoVehicleChanged?.Invoke(lane, false);
+                }
+                catch (Exception ex)
+                {
+                    AppendLog("LaneNoVehicleChanged handler threw: " + ex.Message);
+                }
+            }
         }
 
         // Handle lanestart topic messages, e.g. lanestart/left/source with payload "Stage" or "Guard"

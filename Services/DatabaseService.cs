@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
@@ -309,6 +310,263 @@ namespace PulsarUI.Services
             }
 
             return finishLines;
+        }
+
+        // ============================================================
+        // Run persistence (writes)
+        //
+        // Every method below swallows its own exceptions and logs to
+        // Console.Error - a failure to persist run data must never throw
+        // into a UI-thread event handler or interrupt the live run.
+        // ============================================================
+
+        public async Task<long?> ResolveRacerIdAsync(int categoryId, string? raceNumber)
+        {
+            if (string.IsNullOrWhiteSpace(raceNumber)) return null;
+
+            try
+            {
+                const string sqlText = """
+                                       SELECT racers.id
+                                       FROM racers
+                                       WHERE racers.category = @Category AND racers.race_number = @RaceNum
+                                       """;
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sqlText;
+                command.Parameters.AddWithValue("@Category", categoryId);
+                command.Parameters.AddWithValue("@RaceNum", raceNumber);
+
+                var result = await command.ExecuteScalarAsync();
+                if (result == null || result is DBNull) return null;
+                return Convert.ToInt64(result);
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine("ResolveRacerIdAsync error: " + ex.Message);
+                return null;
+            }
+        }
+
+        public async Task<long?> InsertRunPairAsync(RunPairInsert record)
+        {
+            try
+            {
+                const string sqlText = """
+                                       INSERT INTO run_pair (
+                                           run_timestamp, category_id, race_mode, round_number, start_mode,
+                                           finish_distance, run_timeout, stage_freeze, ds_foul, worst_foul,
+                                           tree_delay, as_settle, as_stagetostart, as_variance, as_timeout
+                                       ) VALUES (
+                                           @RunTimestamp, @CategoryId, @RaceMode, @RoundNumber, @StartMode,
+                                           @FinishDistance, @RunTimeout, @StageFreeze, @DsFoul, @WorstFoul,
+                                           @TreeDelay, @AsSettle, @AsStageToStart, @AsVariance, @AsTimeout
+                                       );
+                                       SELECT last_insert_rowid();
+                                       """;
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sqlText;
+                command.Parameters.AddWithValue("@RunTimestamp", record.RunTimestamp);
+                command.Parameters.AddWithValue("@CategoryId", record.CategoryId);
+                command.Parameters.AddWithValue("@RaceMode", record.RaceMode);
+                command.Parameters.AddWithValue("@RoundNumber", (object?)record.RoundNumber ?? DBNull.Value);
+                command.Parameters.AddWithValue("@StartMode", record.StartMode);
+                command.Parameters.AddWithValue("@FinishDistance", record.FinishDistance);
+                command.Parameters.AddWithValue("@RunTimeout", (object?)record.RunTimeout ?? DBNull.Value);
+                command.Parameters.AddWithValue("@StageFreeze", record.StageFreeze);
+                command.Parameters.AddWithValue("@DsFoul", record.DsFoul);
+                command.Parameters.AddWithValue("@WorstFoul", record.WorstFoul);
+                command.Parameters.AddWithValue("@TreeDelay", (object?)record.TreeDelay ?? DBNull.Value);
+                command.Parameters.AddWithValue("@AsSettle", (object?)record.AsSettle ?? DBNull.Value);
+                command.Parameters.AddWithValue("@AsStageToStart", (object?)record.AsStageToStart ?? DBNull.Value);
+                command.Parameters.AddWithValue("@AsVariance", (object?)record.AsVariance ?? DBNull.Value);
+                command.Parameters.AddWithValue("@AsTimeout", (object?)record.AsTimeout ?? DBNull.Value);
+
+                var result = await command.ExecuteScalarAsync();
+                if (result == null || result is DBNull) return null;
+                return Convert.ToInt64(result);
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine("InsertRunPairAsync error: " + ex.Message);
+                return null;
+            }
+        }
+
+        public async Task<long?> InsertRunIndvAsync(RunIndvInsert record)
+        {
+            try
+            {
+                const string sqlText = """
+                                       INSERT INTO run_indv (
+                                           pair_id, racer_id, lane, race_number, index_time, tree_type
+                                       ) VALUES (
+                                           @PairId, @RacerId, @Lane, @RaceNumber, @IndexTime, @TreeType
+                                       );
+                                       SELECT last_insert_rowid();
+                                       """;
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sqlText;
+                command.Parameters.AddWithValue("@PairId", record.PairId);
+                command.Parameters.AddWithValue("@RacerId", (object?)record.RacerId ?? DBNull.Value);
+                command.Parameters.AddWithValue("@Lane", record.Lane);
+                command.Parameters.AddWithValue("@RaceNumber", (object?)record.RaceNumber ?? DBNull.Value);
+                command.Parameters.AddWithValue("@IndexTime", (object?)record.IndexTime ?? DBNull.Value);
+                command.Parameters.AddWithValue("@TreeType", record.TreeType);
+
+                var result = await command.ExecuteScalarAsync();
+                if (result == null || result is DBNull) return null;
+                return Convert.ToInt64(result);
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine("InsertRunIndvAsync error: " + ex.Message);
+                return null;
+            }
+        }
+
+        public async Task UpdateRunIndvReactionTimeAsync(long runIndvId, string? reactionTime)
+        {
+            try
+            {
+                const string sqlText = """
+                                       UPDATE run_indv SET reaction_time = @ReactionTime WHERE run_indv_id = @Id
+                                       """;
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sqlText;
+                command.Parameters.AddWithValue("@ReactionTime", (object?)reactionTime ?? DBNull.Value);
+                command.Parameters.AddWithValue("@Id", runIndvId);
+
+                await command.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine("UpdateRunIndvReactionTimeAsync error: " + ex.Message);
+            }
+        }
+
+        public async Task UpdateRunPairResultAsync(long pairId, int? firstLane, int? winnerLane)
+        {
+            try
+            {
+                const string sqlText = """
+                                       UPDATE run_pair SET first_lane = @FirstLane, winner_lane = @WinnerLane WHERE pair_id = @Id
+                                       """;
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sqlText;
+                command.Parameters.AddWithValue("@FirstLane", (object?)firstLane ?? DBNull.Value);
+                command.Parameters.AddWithValue("@WinnerLane", (object?)winnerLane ?? DBNull.Value);
+                command.Parameters.AddWithValue("@Id", pairId);
+
+                await command.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine("UpdateRunPairResultAsync error: " + ex.Message);
+            }
+        }
+
+        public async Task UpsertIncrementalEtAsync(long runIndvId, int distanceMm, string et)
+        {
+            try
+            {
+                const string sqlText = """
+                                       INSERT INTO incremental_et (run_indv_id, distance, et)
+                                       VALUES (@RunIndvId, @Distance, @Et)
+                                       ON CONFLICT(run_indv_id, distance) DO UPDATE SET et = excluded.et
+                                       """;
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sqlText;
+                command.Parameters.AddWithValue("@RunIndvId", runIndvId);
+                command.Parameters.AddWithValue("@Distance", distanceMm);
+                command.Parameters.AddWithValue("@Et", et);
+
+                await command.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine("UpsertIncrementalEtAsync error: " + ex.Message);
+            }
+        }
+
+        public async Task UpsertIncrementalSpeedAsync(long runIndvId, int distanceMm, string speed)
+        {
+            try
+            {
+                const string sqlText = """
+                                       INSERT INTO incremental_speed (run_indv_id, distance, speed)
+                                       VALUES (@RunIndvId, @Distance, @Speed)
+                                       ON CONFLICT(run_indv_id, distance) DO UPDATE SET speed = excluded.speed
+                                       """;
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sqlText;
+                command.Parameters.AddWithValue("@RunIndvId", runIndvId);
+                command.Parameters.AddWithValue("@Distance", distanceMm);
+                command.Parameters.AddWithValue("@Speed", speed);
+
+                await command.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine("UpsertIncrementalSpeedAsync error: " + ex.Message);
+            }
+        }
+
+        public async Task InsertRunRemarkAsync(long runIndvId, int remark)
+        {
+            try
+            {
+                const string sqlText = """
+                                       INSERT OR IGNORE INTO run_remark (run_indv_id, remark) VALUES (@RunIndvId, @Remark)
+                                       """;
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sqlText;
+                command.Parameters.AddWithValue("@RunIndvId", runIndvId);
+                command.Parameters.AddWithValue("@Remark", remark);
+
+                await command.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine("InsertRunRemarkAsync error: " + ex.Message);
+            }
+        }
+
+        public async Task DeleteRunRemarkAsync(long runIndvId, int remark)
+        {
+            try
+            {
+                const string sqlText = """
+                                       DELETE FROM run_remark WHERE run_indv_id = @RunIndvId AND remark = @Remark
+                                       """;
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sqlText;
+                command.Parameters.AddWithValue("@RunIndvId", runIndvId);
+                command.Parameters.AddWithValue("@Remark", remark);
+
+                await command.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine("DeleteRunRemarkAsync error: " + ex.Message);
+            }
         }
     }
 }

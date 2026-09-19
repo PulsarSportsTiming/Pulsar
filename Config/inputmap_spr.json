@@ -17,8 +17,8 @@
       { "Device": "192.168.20.24", "InputIndex": 4, "lane": 1, "enabled": true }
     ],
     "GuardB": [
-      { "Device": "192.168.20.23", "InputIndex": 5, "lane": 0, "enabled": false },
-      { "Device": "192.168.20.24", "InputIndex": 5, "lane": 1, "enabled": false }
+      { "Device": "192.168.20.23", "InputIndex": 5, "lane": 0, "enabled": true },
+      { "Device": "192.168.20.24", "InputIndex": 5, "lane": 1, "enabled": true }
     ],
     "RunStartTrigger": { "Device": "192.168.20.23", "InputIndex": 8, "enabled": true }
   },
@@ -41,7 +41,7 @@
     { "Id": { "Device": "192.168.20.22", "InputIndex": 8, "enabled": true }, "distanceMm": 402336, "lane": 1, "enabled": true }
   ],
   "SpeedTraps": [
-    { "Id": { "Start": 181051, "End": 201168}},
+    { "Id": { "Start": 18288, "End": 284683}},
     { "Id": { "Start": 284683, "End": 304800}},
     { "Id": { "Start": 382219, "End": 402336}}
   ]
