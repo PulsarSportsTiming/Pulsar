@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.Input;
 using System.Threading.Tasks;
 using System.Collections.ObjectModel;
+using System.Data.SqlTypes;
 using Microsoft.Extensions.Configuration;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -90,6 +91,8 @@ namespace PulsarUI.ViewModels
 
         private static partial Regex IndexPatternRegex();
 
+        
+
         [ObservableProperty]
         private bool _systemEngaged;
         partial void OnSystemEngagedChanged(bool value)
@@ -107,6 +110,7 @@ namespace PulsarUI.ViewModels
                 // into this one.
                 try
                 {
+                    _mqttService?.ArmRunTiming();
                     _mqttService?.ResetLaneNoVehicleFlags();
                 }
                 catch (Exception ex)
@@ -114,7 +118,7 @@ namespace PulsarUI.ViewModels
                     LocalLog("ResetLaneNoVehicleFlags failed: " + ex.Message);
                 }
 
-                var p = new Pair { Id = Guid.NewGuid() };
+                var p = _confirmedEngagementPair ?? new Pair { Id = Guid.NewGuid() };
 
                 // A fresh pair is being engaged - drop any DB identity left over from the
                 // previous run so persistence calls for the new run start from a clean slate.
@@ -122,27 +126,22 @@ namespace PulsarUI.ViewModels
                 _currentRunIndvIds[0] = null;
                 _currentRunIndvIds[1] = null;
 
-                // Resolve category for the engaged pair. Prefer CategoryDetails if populated.
-                Category? resolvedCat = EngagePairQueueCategory?.CategoryDetails?.Id != 0
-                    ? EngagePairQueueCategory.CategoryDetails
-                    : (Categories != null && EngagePairQueueCategory != null ? Categories.FirstOrDefault(c => c != null && c.Id == EngagePairQueueCategory.Category) : null);
-
-                p.Category = resolvedCat;
-                p.RunMode = EngagePairQueueCategory?.Mode;
-
-                // Create left/right runs from EngagedRacers (clone to decouple UI instances)
-                var leftEntry = EngagedRacers.ElementAtOrDefault(0)?.Clone(2) ?? new RaceEntry { QueueIndex = 2, Lane = 0 };
-                var rightEntry = EngagedRacers.ElementAtOrDefault(1)?.Clone(2) ?? new RaceEntry { QueueIndex = 2, Lane = 1 };
-                p.Runs = new[] { new Run { Entry = leftEntry }, new Run { Entry = rightEntry } };
-
-                // Populate expected reaction times
-                PulsarUI.Services.TimingHelpers.PopulateExpectedReactionTimes(p);
+                if (_confirmedEngagementPair == null)
+                {
+                    p.Category = EngagePairQueueCategory?.CategoryDetails;
+                    p.RunMode = EngagePairQueueCategory?.Mode;
+                    var leftEntry = EngagedRacers.ElementAtOrDefault(0)?.Clone(2) ?? new RaceEntry { QueueIndex = 2, Lane = 0 };
+                    var rightEntry = EngagedRacers.ElementAtOrDefault(1)?.Clone(2) ?? new RaceEntry { QueueIndex = 2, Lane = 1 };
+                    p.Runs = new[] { new Run { Entry = leftEntry }, new Run { Entry = rightEntry } };
+                    TimingHelpers.PopulateExpectedReactionTimes(p);
+                }
 
                 // A fresh pair is being engaged - drop any snapshot kept around for Clear (F9)
                 // from a previous pair so it can't leak into this one.
                 _lastEngagedPairModel = null;
 
                 EngagedPairModel = p;
+                RefreshOverUnderLabels();
                 MaybeDebug($"Created EngagedPair {p.Id} CategoryId={p.Category?.Id} Mode={p.RunMode}");
 
                 // A fresh pair starts with empty Remarks/Results on both lanes; clear the
@@ -197,6 +196,10 @@ namespace PulsarUI.ViewModels
             }
             else
             {
+                RunActive = false;
+                _mqttService?.StopRunTiming();
+                StopRunTimer();
+
                 // Keep a snapshot of the just-disengaged pair so CanClear()/Clear() (F9) can
                 // still see/reset its lane details afterwards - SystemEngaged is set false as
                 // part of normal run completion (see MaybeCheckAndCompleteRun), at which point
@@ -234,10 +237,13 @@ namespace PulsarUI.ViewModels
             }
             else
             {
+                _mqttService?.StopRunTiming();
                 StopBreakoutCheckTimer();
                 StopRunTimer();
             }
         }
+
+        public bool SystemIdle => !(SystemEngaged || RunActive);
 
         // Run timeout timer. Begins when the run is made active and continues for the duration
         // of the run for the time specified in the category configuration, unless stopped by
@@ -248,8 +254,9 @@ namespace PulsarUI.ViewModels
         {
             StopRunTimer();
             _runTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(EngagedPairModel.Category.RunTimeout) };
-            _runTimer.Tick += (_, _) =>
+            _runTimer.Tick += (sender, _) =>
             {
+                if (!ReferenceEquals(sender, _runTimer) || !RunActive) return;
                 AbortRun();
             };
             _runTimer.Start();
@@ -273,8 +280,9 @@ namespace PulsarUI.ViewModels
         {
             StopBreakoutCheckTimer();
             _breakoutCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            _breakoutCheckTimer.Tick += (_, _) =>
+            _breakoutCheckTimer.Tick += (sender, _) =>
             {
+                if (!ReferenceEquals(sender, _breakoutCheckTimer) || !RunActive) return;
                 try
                 {
                     long nowNs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000_000L;
@@ -432,6 +440,7 @@ namespace PulsarUI.ViewModels
         // already been cleared (e.g. on normal run completion). Reset to null as soon as a
         // fresh pair is engaged - see OnSystemEngagedChanged.
         private Pair? _lastEngagedPairModel;
+        private bool _isReEngaging;
 
         // Cache input map data for refreshing timing labels based on engaged category
         private List<DownTrackInput>? _cachedInputs;
@@ -453,6 +462,7 @@ namespace PulsarUI.ViewModels
 
         public MainWindowViewModel()
         {
+            WatchEngagedRacers();
             // Short-circuit heavy initialization in design mode so the XAML designer can instantiate this VM safely.
             if (Avalonia.Controls.Design.IsDesignMode)
             {
@@ -464,6 +474,7 @@ namespace PulsarUI.ViewModels
                 QueuePairRightTreeText = string.Empty;
                 return;
             }
+
             // Log constructor entry for diagnostics
             LocalLog("MainWindowViewModel ctor start");
             
@@ -518,6 +529,7 @@ namespace PulsarUI.ViewModels
                     {
                         try
                         {
+                            if (!RunActive || !_mqttService.IsCurrentRun(runId)) return;
                             LocalLog($"ReactionTimeComputed invoked: lane={lane} rtNs={rtNs} runId={runId} detectionSource={detectionSource} detectionTs={detectionTimestampNs}");
                             // Map lane to run index (left=0,right=1)
                             int runIndex = lane.Equals("left", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
@@ -655,6 +667,7 @@ namespace PulsarUI.ViewModels
                     {
                         try
                         {
+                            if (!RunActive || !_mqttService.IsCurrentRun(runId)) return;
                             // Filter based on engaged category's finish line
                             if (EngagePairQueueCategory != null && FinishList != null && dti != null)
                             {
@@ -956,16 +969,19 @@ namespace PulsarUI.ViewModels
                 LocalLog("Failed to wire TestMessageReceived handler: " + ex.Message);
             }
              
+            _mqttService.EngagementConfirmed += HandleEngagementConfirmation;
+
             // Wire RunStartReceived so ViewModel can start a run when the RunStartTrigger role timestamp arrives
             try
             {
                 _mqttService.RunStartReceived += (tsNs) =>
                 {
+                    var runId = _mqttService.CurrentRunId;
                     // Marshal onto Avalonia UI thread
                     Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                     {
                         // Only start the run if system is engaged
-                        if (!SystemEngaged)
+                        if (!SystemEngaged || !_mqttService.IsCurrentRun(runId))
                         {
                             MaybeDebug($"RunStartReceived ignored because SystemEngaged==false; tsNs={tsNs}");
                             return;
@@ -1189,8 +1205,8 @@ namespace PulsarUI.ViewModels
             });
 
             // Explicit ICommand properties for ClearQueue and SwapEngagedPair (initialize in ctor)
-            ClearQueueCommand = new RelayCommand(() => ClearQueue());
-            SwapEngagedPairCommand = new RelayCommand(() => SwapEngagedPair());
+            ClearQueueCommand = new RelayCommand(() => ClearQueue(), () => CanEditPair);
+            SwapEngagedPairCommand = new AsyncRelayCommand(SwapEngagedPair, () => CanEditPair);
 
             // Capture typed IRelayCommand references generated by the source generator so we can call NotifyCanExecuteChanged without casts
             _queuePairCommandRef = QueuePairCommand as CommunityToolkit.Mvvm.Input.IRelayCommand;
@@ -1707,6 +1723,7 @@ namespace PulsarUI.ViewModels
                 // Blank every on-screen timing label (Reaction Time, ET/speed traps, Result, Remarks) for both lanes.
                 foreach (var label in LeftTimingLabels) label.Value = string.Empty;
                 foreach (var label in RightTimingLabels) label.Value = string.Empty;
+                RefreshOverUnderLabels();
 
                 // Force republish of the (now empty) Result/Remarks even if they match a previously-cached empty state.
                 _lastPublishedResults.Clear();
@@ -1741,122 +1758,251 @@ namespace PulsarUI.ViewModels
             run.BreakoutDeltaNs = null;
         }
         
+        private bool CanReRunPair() => CanEditPair && !RunActive && !SystemEngaged && EngagedRacers.Any(r => !string.IsNullOrWhiteSpace(r.RaceNumber));
+
+        [RelayCommand(CanExecute = nameof(CanReRunPair))]
+        private async Task ReRunPair()
+        {
+            if (!CanReRunPair()) return;
+            await RequestEngagementAsync(reRun: true);
+        }
+
+        private void WatchEngagedRacers()
+        {
+            foreach (var racer in EngagedRacers)
+                racer.PropertyChanged += EngagedRacerChanged;
+            EngagedRacers.CollectionChanged += (_, e) =>
+            {
+                if (e.OldItems != null)
+                    foreach (RaceEntry racer in e.OldItems) racer.PropertyChanged -= EngagedRacerChanged;
+                if (e.NewItems != null)
+                    foreach (RaceEntry racer in e.NewItems) racer.PropertyChanged += EngagedRacerChanged;
+                UpdateEngagePairTreeTexts();
+                UpdateButtonStatuses();
+            };
+            UpdateEngagePairTreeTexts();
+        }
+
+        private void EngagedRacerChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(RaceEntry.Tree) || string.IsNullOrEmpty(e.PropertyName))
+                UpdateEngagePairTreeTexts();
+            if (e.PropertyName == nameof(RaceEntry.RaceNumber) || string.IsNullOrEmpty(e.PropertyName))
+                UpdateButtonStatuses();
+        }
+
+        private void UpdateEngagePairTreeTexts()
+        {
+            EngagePairLeftTreeText = EngagedRacers.ElementAtOrDefault(0)?.Tree?.Name ?? string.Empty;
+            EngagePairRightTreeText = EngagedRacers.ElementAtOrDefault(1)?.Tree?.Name ?? string.Empty;
+        }
+
+        private void ReportReRunError(string message)
+        {
+            LocalLog(message);
+            TestMessageTopic = "Re-run";
+            TestMessagePayload = message;
+            ShowTestMessagePopup = true;
+        }
+
+        private static readonly TimeSpan EngagementTimeout = TimeSpan.FromSeconds(10);
+
+        // A private request snapshot is owned until tallyback, timeout, or Reset.
+        private sealed record PendingEngagement(Pair Pair, CategQueueItem Category, bool FromQueue,
+            bool ReRun, int FinishDistanceMm, string FinishText)
+        {
+            public System.Threading.CancellationTokenSource Cancellation { get; } = new();
+            public long StartedAt { get; set; }
+            public volatile bool AwaitingConfirmation;
+        }
+
+        private PendingEngagement? _pendingEngagement;
+        private Pair? _confirmedEngagementPair;
+        public bool CanEditPair => _pendingEngagement == null && !_isReEngaging;
+
         [RelayCommand(CanExecute = nameof(CanEngagePair))]
         private void EngagePair()
         {
             if (!CanEngagePair()) return;
-            bool queueHasEntries = QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
+            _ = RequestEngagementAsync(reRun: false);
+        }
+
+        private async Task RequestEngagementAsync(bool reRun)
+        {
+            if (_pendingEngagement != null) return;
+            PendingEngagement? request = null;
+            try
+            {
+                bool fromQueue = !reRun && QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
+                var sourceCategory = reRun ? EngagePairQueueCategory
+                    : fromQueue ? QueuePairQueueCategory : EnterPairQueueCategory;
+                var category = Categories.FirstOrDefault(c => c.Id == sourceCategory.Category);
+                if (category == null || category.Id == 0)
+                    throw new InvalidOperationException("The pair has no valid category.");
+                category = JsonSerializer.Deserialize<Category>(JsonSerializer.Serialize(category))!;
+                var queueCategory = sourceCategory.Clone(2);
+                queueCategory.CategoryDetails = category;
+                if (!reRun && !fromQueue)
+                    queueCategory.Finish = SelectedFinishLine?.Id ?? queueCategory.Finish;
+                var racers = reRun ? EngagedRacers : fromQueue ? QueuedRacers : EnterRacers;
+                var pair = new Pair
+                {
+                    Id = Guid.NewGuid(), Category = category, RunMode = queueCategory.Mode,
+                    Runs = racers.Select(r => new Run { Entry = r.Clone(2) }).ToArray()
+                };
+                foreach (var run in pair.Runs)
+                {
+                    if (run.Entry?.Tree is { } tree)
+                        run.Entry.Tree = new TreeType { Id = tree.Id, Name = tree.Name,
+                            CountdownType = tree.CountdownType, CountdownSpeed = tree.CountdownSpeed };
+                }
+                TimingHelpers.PopulateExpectedReactionTimes(pair);
+                var finish = FinishList?.FirstOrDefault(f => f.Id == queueCategory.Finish);
+                var finishText = finish?.DistanceString
+                    ?? FinishList?.FirstOrDefault(f => f.Id == category.Finish)?.DistanceString
+                    ?? (fromQueue ? QueuePairFinishText : string.Empty);
+                request = new PendingEngagement(pair, queueCategory, fromQueue, reRun,
+                    finish?.Distance ?? 0, finishText ?? string.Empty);
+                _isReEngaging = reRun;
+                _pendingEngagement = request;
+                UpdateButtonStatuses();
+
+                await _mqttService.PrepareEngagementAsync(queueCategory, pair.Runs.Select(r => r.Entry!),
+                    reRun, request.Cancellation.Token);
+                if (_pendingEngagement != request) return;
+                var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+                options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+                options.Converters.Add(new PulsarUI.Services.JsonConverters.DateTimeUtcConverter());
+                options.Converters.Add(new PulsarUI.Services.JsonConverters.NullableDateTimeUtcConverter());
+                var payload = JsonSerializer.Serialize(new { pair, finishIndex = queueCategory.Finish,
+                    finishDistanceMm = request.FinishDistanceMm, speedUnit = AppSettings.SpeedUnit }, options);
+                await _mqttService.PublishEngagementAsync(payload, request.Cancellation.Token);
+                if (_pendingEngagement != request) return;
+                // Setup triggers the controller's engaged event. Arm immediately before sending it,
+                // after connection/semaphore waits, so even a synchronous reply is accepted.
+                await _mqttService.PublishEngagementSetupAsync(queueCategory, () =>
+                {
+                    request.Cancellation.Token.ThrowIfCancellationRequested();
+                    request.StartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+                    request.AwaitingConfirmation = true;
+                    _ = WatchEngagementTimeoutAsync(request);
+                }, request.Cancellation.Token);
+            }
+            catch (OperationCanceledException) when (request?.Cancellation.IsCancellationRequested == true) { }
+            catch (Exception ex)
+            {
+                LocalLog("Engagement request failed: " + ex.Message);
+                if (request == null || (_pendingEngagement == request && !request.AwaitingConfirmation))
+                {
+                    if (request != null) CancelPendingEngagement();
+                    TestMessageTopic = "Engagement";
+                    TestMessagePayload = "Could not engage pair: " + ex.Message;
+                    ShowTestMessagePopup = true;
+                }
+                // Once setup has been attempted, missing tallyback follows the ten-second warning.
+            }
+        }
+
+        private async Task WatchEngagementTimeoutAsync(PendingEngagement request)
+        {
+            try
+            {
+                await Task.Delay(EngagementTimeout, request.Cancellation.Token);
+                await Dispatcher.UIThread.InvokeAsync(() => ExpireEngagement(request));
+            }
+            catch (OperationCanceledException) { }
+        }
+
+        private void ExpireEngagement(PendingEngagement request)
+        {
+            if (_pendingEngagement != request) return;
+            CancelPendingEngagement();
+            TestMessageTopic = "Engagement";
+            TestMessagePayload = "Startline controller not responding";
+            ShowTestMessagePopup = true;
+        }
+
+        private void CancelPendingEngagement()
+        {
+            var request = _pendingEngagement;
+            _pendingEngagement = null;
+            _isReEngaging = false;
+            request?.Cancellation.Cancel();
+            UpdateButtonStatuses();
+        }
+
+        private void HandleEngagementConfirmation()
+        {
+            // Capture ownership at receipt, not when the UI callback eventually runs.
+            var request = System.Threading.Volatile.Read(ref _pendingEngagement);
+            if (request?.AwaitingConfirmation != true) return;
+            Dispatcher.UIThread.Post(() => ConfirmEngagement(request));
+        }
+
+        private void ConfirmEngagement(PendingEngagement? request)
+        {
+            if (request == null || _pendingEngagement != request || !request.AwaitingConfirmation) return;
+            if (System.Diagnostics.Stopwatch.GetElapsedTime(request.StartedAt) >= EngagementTimeout)
+            {
+                ExpireEngagement(request);
+                return;
+            }
+            CancelPendingEngagement();
+            if (request.ReRun) _ = _mqttService.ClearDisplays();
+            EngagePairQueueCategory = request.Category;
             for (int i = 0; i < EngagedRacers.Count; i++)
             {
-                EngagedRacers[i] = queueHasEntries
-                    ? QueuedRacers[i].Clone(2)
-                    : EnterRacers[i].Clone(2);
+                EngagedRacers[i] = request.Pair.Runs[i].Entry!.Clone(2);
                 _ = _mqttService.PubQueueRacersAsync(EngagedRacers[i]);
             }
-            for (int i = 0; i < QueuedRacers.Count; i++)
+            _ = _mqttService.PubQueueCategAsync(EngagePairQueueCategory);
+            if (!request.ReRun)
             {
-                // Publish an explicit queuedpair null entry to clear subscribers' queued pair
-                _ = _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 1, Lane = i, RaceNumber = null, HandicapIndex = null });
-                // Then clear the local queued entry
-                QueuedRacers[i].ClearAll();
-            }
-            Category? category;
-            if (queueHasEntries)
-            {
-                category = Categories?.Find(c => c?.Id == QueuePairQueueCategory.Category);
-                EngagePairQueueCategory = QueuePairQueueCategory.Clone(2);
-            }
-            else
-            {
-                category = Categories?.Find(c => c?.Id == EnterPairQueueCategory.Category);
-                // Ensure the EnterPairQueueCategory carries the selected Finish id before we clone it for engagement
-                EnterPairQueueCategory.Finish = SelectedFinishLine?.Id ?? EnterPairQueueCategory.Finish;
-                EngagePairQueueCategory = EnterPairQueueCategory.Clone(2);
-
-                // Suppress RaceEntry Tree publishes while we ClearAll and set defaults for EnterRacers
-                _suppressRaceEntryPublish = true;
-                for (int i = 0; i < EnterRacers.Count; i++)
+                for (int i = 0; i < QueuedRacers.Count; i++)
                 {
-                    // Detach handler, clear and reattach after default assignment
-                    EnterRacers[i].PropertyChanged -= EnterPairRacerEntryHandler;
-                    EnterRacers[i].ClearAll();
+                    QueuedRacers[i].ClearAll();
+                    _ = _mqttService.PubQueueRacersAsync(new RaceEntry { QueueIndex = 1, Lane = i });
                 }
-
-                // After clearing, set defaults below (still suppressed until after this block)
-            }
-            if (category == null) return;
-
-            // Compute and set the textual Finish and Mode for the engaged pair so UI updates appropriately
-            string engageFinishDesc = string.Empty;
-            if (EngagePairQueueCategory != null)
-            {
-                // Prefer a direct lookup by the queue category's Finish id
-                if (FinishList != null)
+                if (!request.FromQueue)
                 {
-                    var fl = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.Finish);
-                    if (fl != null) engageFinishDesc = fl.DistanceString ?? string.Empty;
-                }
-
-                // If still empty, prefer CategoryDetails' Finish id
-                if (string.IsNullOrEmpty(engageFinishDesc) && EngagePairQueueCategory.CategoryDetails != null && FinishList != null)
-                {
-                    var fl2 = FinishList.FirstOrDefault(f => f != null && f.Id == EngagePairQueueCategory.CategoryDetails.Finish);
-                    if (fl2 != null) engageFinishDesc = fl2.DistanceString ?? string.Empty;
-                }
-
-                // Finally fall back to previously computed QueuePairFinishText when engaging from queue
-                if (string.IsNullOrEmpty(engageFinishDesc) && queueHasEntries)
-                {
-                    engageFinishDesc = QueuePairFinishText ?? string.Empty;
-                }
-            }
-            EngagePairFinishText = engageFinishDesc;
-
-            // Debug: publish engage finish info
-            var msg2 = $"EngagePair DEBUG: EngagePairQueueCategory.Finish={EngagePairQueueCategory?.Finish}, CategoryDetails.Finish={EngagePairQueueCategory?.CategoryDetails?.Finish}, ResolvedDesc=\"{EngagePairFinishText}\", QueuePairFinishText=\"{QueuePairFinishText}\"";
-            MaybeDebug(msg2);
-
-            // Set EngagePairModeText similarly to QueuePairModeText so UI shows the engaged mode/round
-            string modeName = EngagePairQueueCategory != null ? EngagePairQueueCategory.Mode.GetDisplayName() : string.Empty;
-            EngagePairModeText = $"{modeName} Round {EngagePairQueueCategory?.Round ?? 0}";
-
-            // After engaging, only reset the Enter Pair UI lanes to the EnterPair category default
-            // when we engaged from the Enter pair (i.e., no queued entries). Do not clear EnterRacers
-            // when the user engaged a queued pair — preserve the Enter pair inputs.
-            if (!queueHasEntries)
-            {
-                if (EnterPairQueueCategory != null && Categories != null && TreeList != null && TreeList.Count > 0)
-                {
-                    var enterCat = EnterPairQueueCategory.CategoryDetails ?? Categories.FirstOrDefault(c => c != null && c.Id == EnterPairQueueCategory.Category);
-                    if (enterCat != null)
+                    _suppressRaceEntryPublish = true;
+                    try
                     {
-                        var defaultTree = TreeList.FirstOrDefault(t => t != null && t.Id == enterCat.TreeType);
+                        var enterCategory = Categories.FirstOrDefault(c => c.Id == EnterPairQueueCategory.Category)
+                            ?? EnterPairQueueCategory.CategoryDetails;
+                        var defaultTree = TreeList?.FirstOrDefault(t => t.Id == enterCategory.TreeType);
                         for (int i = 0; i < EnterRacers.Count; i++)
                         {
-                            // Clear textual details and reset Tree to default for the Enter pair lanes
-                            // Ensure we operate on an object that won't fire handlers while we change it
-                            EnterRacers[i].PropertyChanged -= EnterPairRacerEntryHandler;
-                            EnterRacers[i].ClearAll();
-                            if (defaultTree != null)
+                            var racer = EnterRacers[i];
+                            racer.PropertyChanged -= EnterPairRacerEntryHandler;
+                            try
                             {
-                                EnterRacers[i].Tree = defaultTree;
-                                if (i == 0) SelectedLeftTree = defaultTree;
-                                else if (i == 1) SelectedRightTree = defaultTree;
+                                racer.ClearAll();
+                                if (defaultTree != null)
+                                {
+                                    racer.Tree = defaultTree;
+                                    if (i == 0) SelectedLeftTree = defaultTree;
+                                    else SelectedRightTree = defaultTree;
+                                }
                             }
-                            EnterRacers[i].PropertyChanged += EnterPairRacerEntryHandler;
+                            finally { racer.PropertyChanged += EnterPairRacerEntryHandler; }
                         }
                     }
-                }
-
-                // Re-enable publishes and emit consolidated EnterRacers publishes so subscribers only see final state
-                _suppressRaceEntryPublish = false;
-                if (EnterPairQueueCategory != null)
-                {
-                    for (int i = 0; i < EnterRacers.Count; i++)
-                        _ = _mqttService.PubQueueRacersAsync(EnterRacers[i]);
+                    finally { _suppressRaceEntryPublish = false; }
+                    foreach (var racer in EnterRacers) _ = _mqttService.PubQueueRacersAsync(racer);
                 }
             }
+            EngagePairFinishText = request.FinishText;
+            EngagePairModeText = $"{request.Category.Mode.GetDisplayName()} Round {request.Category.Round}";
+            _confirmedEngagementPair = request.Pair;
+            try { CompleteEngagement(request.Pair.Category!); }
+            finally { _confirmedEngagementPair = null; }
+        }
 
+        private void CompleteEngagement(Category category)
+        {
+            foreach (var label in LeftTimingLabels) label.Value = string.Empty;
+            foreach (var label in RightTimingLabels) label.Value = string.Empty;
             EngagePairCategText = category.Name; 
             EngagePairStartModeText = category.StartMode switch
             {
@@ -1868,98 +2014,22 @@ namespace PulsarUI.ViewModels
                 _ => "Unknown Start Mode"
             };
             SystemEngaged = true;
-            // Also publish an engaged Pair payload (include GUID and runs) so runqueue consumers see a single object
-            try
-            {
-                var p = new Pair { };
-                p.Id = Guid.NewGuid();
-                // Resolve category similar to OnSystemEngagedChanged
-                Category? resolvedCat = null;
-                if (EngagePairQueueCategory?.CategoryDetails != null && EngagePairQueueCategory.CategoryDetails.Id != 0)
-                    resolvedCat = EngagePairQueueCategory.CategoryDetails;
-                else if (Categories != null)
-                    resolvedCat = Categories.FirstOrDefault(c => c != null && c.Id == EngagePairQueueCategory.Category);
-                p.Category = resolvedCat;
-                p.RunMode = EngagePairQueueCategory?.Mode;
-                // Ensure EngagedRacers has two entries
-                var left = EngagedRacers.ElementAtOrDefault(0) ?? new RaceEntry { Lane = 0, QueueIndex = 2 };
-                var right = EngagedRacers.ElementAtOrDefault(1) ?? new RaceEntry { Lane = 1, QueueIndex = 2 };
-                var leftRun = new Run { Entry = left.Clone(2) };
-                var rightRun = new Run { Entry = right.Clone(2) };
-                p.Runs = new Run[] { leftRun, rightRun };
-                // Populate expected reaction times for the created runs
-                PulsarUI.Services.TimingHelpers.PopulateExpectedReactionTimes(p);
-                // Serialize and publish
-                var options = new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
-                options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase));
-                // Register DateTime converters so RunStartTime serializes with our desired format
-                options.Converters.Add(new PulsarUI.Services.JsonConverters.DateTimeUtcConverter());
-                options.Converters.Add(new PulsarUI.Services.JsonConverters.NullableDateTimeUtcConverter());
-                var minimal = new
-                {
-                    id = p.Id,
-                    categoryId = p.Category?.Id,
-                    runMode = p.RunMode?.ToString(),
-                    runs = p.Runs?.Select(r => new { lane = r.Entry?.Lane, queueIndex = r.Entry?.QueueIndex, raceNumber = r.Entry?.RaceNumber, treeId = r.Entry?.Tree?.Id }).ToArray()
-                };
-                var payload = System.Text.Json.JsonSerializer.Serialize(minimal, options);
-                if (_mqttService != null) _ = _mqttService.PublishMqtt("runqueue/engagedpair/pair", payload);
-
-                // Publish full Pair to debug topic so subscribers can see complete Pair including GUID and computed ReactionTimes
-                try
-                {
-                    if (_mqttService != null)
-                    {
-                        // Include finish index and finish distance (mm) alongside the full Pair
-                        int finishIndex = EngagePairQueueCategory?.Finish ?? 0;
-                        int finishDistanceMm = 0;
-                        if (FinishList != null && finishIndex != 0)
-                        {
-                            var fl = FinishList.FirstOrDefault(f => f != null && f.Id == finishIndex);
-                            if (fl != null) finishDistanceMm = fl.Distance;
-                        }
-
-                        var fullObj = new { pair = p, finishIndex = finishIndex, finishDistanceMm = finishDistanceMm, speedUnit = AppSettings.SpeedUnit };
-                        var full = System.Text.Json.JsonSerializer.Serialize(fullObj, options);
-                        // Publish full Pair (with finish metadata) for debugging/consumers that need the complete object
-                        _ = _mqttService.PublishMqtt("pulsarui/engagedpair/full", full);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MaybeDebug("EngagedPair debug publish failed: " + ex.Message);
-                }
-
-                // Publish run configuration (runconfig/left, runconfig/right, runconfig/setup)
-                try
-                {
-                    if (_mqttService != null)
-                    {
-                        var racers = p.Runs?.Select(r => r.Entry) ?? Enumerable.Empty<RaceEntry>();
-                        _ = _mqttService.PubRunConfigAsync(EngagePairQueueCategory, racers);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MaybeDebug("PubRunConfigAsync failed: " + ex.Message);
-                }
-
-            }
-            catch (Exception ex)
-            {
-                MaybeDebug("EngagePair immediate publish failed: " + ex.Message);
-            }
-             UpdateButtonStatuses();
+            UpdateButtonStatuses();
         }
 
         [RelayCommand]
         private void ResetEngagePair()
         {
+            CancelPendingEngagement();
+            RunActive = false;
+            _mqttService.StopRunTiming();
             SystemEngaged = false;
             _mqttService.ResetSystemAsync();
             UpdateButtonStatuses();
             foreach (var racer in EngagedRacers)
                 racer.ClearAll();
+            _lastEngagedPairModel = null;
+            RefreshOverUnderLabels();
             _mqttService.ClearDisplays();
             UpdateButtonStatuses();
         }
@@ -1967,6 +2037,7 @@ namespace PulsarUI.ViewModels
         // Implement ClearQueue used by the manually-created ClearQueueCommand
         private void ClearQueue()
         {
+            if (!CanEditPair) return;
             try
             {
                 for (int i = 0; i < QueuedRacers.Count; i++)
@@ -1984,8 +2055,9 @@ namespace PulsarUI.ViewModels
         }
 
         // Implement SwapEngagedPair used by the manually-created SwapEngagedPairCommand
-        private void SwapEngagedPair()
+        private async Task SwapEngagedPair()
         {
+            if (!CanEditPair) return;
             try
             {
                 // Swap the UI EngagedRacers
@@ -1993,8 +2065,12 @@ namespace PulsarUI.ViewModels
                 {
                     var left = EngagedRacers[0];
                     var right = EngagedRacers[1];
-                    EngagedRacers[0] = right.Clone(2);
-                    EngagedRacers[1] = left.Clone(2);
+                    var newLeft = right.Clone(2);
+                    var newRight = left.Clone(2);
+                    newLeft.Lane = 0;
+                    newRight.Lane = 1;
+                    EngagedRacers[0] = newLeft;
+                    EngagedRacers[1] = newRight;
                 }
 
                 // Also swap the underlying runs if present
@@ -2003,13 +2079,52 @@ namespace PulsarUI.ViewModels
                     var tmp = EngagedPairModel.Runs[0];
                     EngagedPairModel.Runs[0] = EngagedPairModel.Runs[1];
                     EngagedPairModel.Runs[1] = tmp;
+                    for (int i = 0; i < 2; i++)
+                    {
+                        if (EngagedPairModel.Runs[i].Entry is { } entry)
+                            entry.Lane = i;
+                    }
                 }
 
-                // Publish the swapped engaged racers
+                RefreshOverUnderLabels();
+
+                // Await the same reset/clear messages as F3 before republishing the pair.
+                await _mqttService.ResetSystemAsync();
+                await _mqttService.ClearDisplays();
+
+                if (EngagePairQueueCategory != null)
+                    await _mqttService.PubQueueCategAsync(EngagePairQueueCategory);
+
                 for (int i = 0; i < EngagedRacers.Count; i++)
+                    await _mqttService.PubQueueRacersAsync(EngagedRacers[i]);
+
+                if (EngagedPairModel is { } pair)
                 {
-                    try { _ = _mqttService.PubQueueRacersAsync(EngagedRacers[i]); } catch { }
+                    var options = new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
+                    options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase));
+                    options.Converters.Add(new PulsarUI.Services.JsonConverters.DateTimeUtcConverter());
+                    options.Converters.Add(new PulsarUI.Services.JsonConverters.NullableDateTimeUtcConverter());
+
+                    var minimal = new
+                    {
+                        id = pair.Id,
+                        categoryId = pair.Category?.Id,
+                        runMode = pair.RunMode?.ToString(),
+                        runs = pair.Runs?.Select(r => new { lane = r.Entry?.Lane, queueIndex = r.Entry?.QueueIndex, raceNumber = r.Entry?.RaceNumber, treeId = r.Entry?.Tree?.Id }).ToArray()
+                    };
+                    await _mqttService.PublishMqtt("runqueue/engagedpair/pair", System.Text.Json.JsonSerializer.Serialize(minimal, options));
+
+                    // Match the full payload published when the pair is first engaged.
+                    int finishIndex = EngagePairQueueCategory?.Finish ?? 0;
+                    int finishDistanceMm = finishIndex == 0 ? 0
+                        : FinishList?.FirstOrDefault(f => f != null && f.Id == finishIndex)?.Distance ?? 0;
+                    var full = new { pair, finishIndex, finishDistanceMm, speedUnit = AppSettings.SpeedUnit };
+                    await _mqttService.PublishMqtt("runqueue/engagedpair/full", System.Text.Json.JsonSerializer.Serialize(full, options));
                 }
+
+                // Scoreboards consume runconfig, which selects each side by Entry.Lane.
+                if (EngagePairQueueCategory != null)
+                    await _mqttService.PubRunConfigAsync(EngagePairQueueCategory, EngagedRacers);
 
                 UpdateButtonStatuses();
             }
@@ -2022,6 +2137,7 @@ namespace PulsarUI.ViewModels
         [RelayCommand(CanExecute = nameof(CanStartRun))]
         private async Task StartRun()
         {
+            if (!CanStartRun()) return;
             await _mqttService.ConsoleStartAsync();
         }
 
@@ -2034,7 +2150,7 @@ namespace PulsarUI.ViewModels
         // queue slot already holds a populated pair. The queue must be cleared (F11) first.
         private bool CanQueuePair()
         {
-            return !QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
+            return CanEditPair && !QueuedRacers.Any(r => !string.IsNullOrEmpty(r.RaceNumber));
         }
         
         // CanExecute for Clear (F9): only when no run is active, the system is disengaged, and
@@ -2044,7 +2160,7 @@ namespace PulsarUI.ViewModels
         // OnSystemEngagedChanged), which happens as part of normal run completion.
         private bool CanClear()
         {
-            if (RunActive || SystemEngaged) return false;
+            if (!CanEditPair || RunActive || SystemEngaged) return false;
 
             var pair = EngagedPairModel ?? _lastEngagedPairModel;
             var left = pair?.Runs?.ElementAtOrDefault(0);
@@ -2072,7 +2188,7 @@ namespace PulsarUI.ViewModels
         // system is already engaged. Must wait for RunActive/SystemEngaged to clear first.
         private bool CanEngagePair()
         {
-            return !RunActive && !SystemEngaged;
+            return CanEditPair && !RunActive && !SystemEngaged;
         }
 
         // Command to enable/disable the Setup UI (bound to F7 in XAML).
@@ -2090,9 +2206,9 @@ namespace PulsarUI.ViewModels
         [RelayCommand(CanExecute = nameof(CanAbortRun))]
         private void AbortRun()
         {
+            if (!RunActive) return;
             try
             {
-                if (!RunActive) return;
                 if (EngagedPairModel?.Runs == null) return;
 
                 // Capture the pair before SystemEngaged=false nulls EngagedPairModel below,
@@ -2124,7 +2240,7 @@ namespace PulsarUI.ViewModels
                 // null for an aborted run) against the run_pair row created when the run went active.
                 PersistRunPairCompletion(pair);
 
-                // Mark run inactive; do not change SystemEngaged per your instruction
+                // Release the system; the displayed pair remains available for re-run.
                 RunActive = false;
                 SystemEngaged = false;
                 MaybeDebug("AbortRun: marked run inactive and added Aborted remark where applicable");
@@ -2133,12 +2249,37 @@ namespace PulsarUI.ViewModels
             {
                 LocalLog("AbortRun error: " + ex.Message);
             }
+            finally
+            {
+                RunActive = false;
+                _mqttService?.StopRunTiming();
+                SystemEngaged = false;
+            }
         }
 
         // CanExecute for AbortRun command
         private bool CanAbortRun()
         {
             return RunActive;
+        }
+
+        private void RefreshOverUnderLabels()
+        {
+            if (!Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(RefreshOverUnderLabels);
+                return;
+            }
+
+            var pair = EngagedPairModel ?? _lastEngagedPairModel;
+            for (var lane = 0; lane < 2; lane++)
+            {
+                var run = pair?.Runs?.ElementAtOrDefault(lane);
+                var entry = run?.Entry ?? EngagedRacers.ElementAtOrDefault(lane);
+                TimingLabelHelpers.UpdateOverUnderLabel(
+                    lane == 0 ? LeftTimingLabels : RightTimingLabels,
+                    entry?.HandicapIndex, run?.FinishEtNs);
+            }
         }
 
         // Refresh timing labels based on engaged category's finish line distance.
@@ -2173,6 +2314,7 @@ namespace PulsarUI.ViewModels
                             LeftTimingLabels.Insert(next, new TimingLabelItem { Label = "Remarks", Value = string.Empty });
                         }
                     }
+                    RefreshOverUnderLabels();
                 });
             }
 
@@ -2193,6 +2335,7 @@ namespace PulsarUI.ViewModels
                             RightTimingLabels.Insert(next, new TimingLabelItem { Label = "Remarks", Value = string.Empty });
                         }
                     }
+                    RefreshOverUnderLabels();
                 });
             }
         }
@@ -2356,6 +2499,9 @@ namespace PulsarUI.ViewModels
             try
             {
                 // Notify derived boolean properties bound in XAML (IsF3Enabled/IsF4Enabled/IsF5Enabled/IsF10Enabled etc.)
+                OnPropertyChanged(nameof(CanEditPair));
+                OnPropertyChanged(nameof(IsF2Enabled));
+                ReRunPairCommand.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(IsF3Enabled));
                 OnPropertyChanged(nameof(IsF4Enabled));
                 OnPropertyChanged(nameof(IsF5Enabled));
@@ -2380,15 +2526,16 @@ namespace PulsarUI.ViewModels
         }
 
         // Expose a few convenience boolean properties used by XAML bindings (conservative defaults)
+        public bool IsF2Enabled => CanReRunPair();
         public bool IsF3Enabled => true; // Reset engage pair
-        public bool IsF4Enabled => true; // Swap engaged pair
+        public bool IsF4Enabled => CanEditPair; // Swap engaged pair
         public bool IsF5Enabled => CanQueuePair(); // Queue
         public bool IsF6Enabled => SystemEngaged; // Start
         public bool IsF7Enabled => true; // Setup
         public bool IsF8Enabled => RunActive; // Abort
         public bool IsF9Enabled => CanClear(); // Clear
         public bool IsF10Enabled => CanEngagePair(); // Engage
-        public bool IsF11Enabled => true; // Clear
+        public bool IsF11Enabled => CanEditPair; // Clear
 
         // Async loaders for finishes/trees/categories: load from database service and set properties
         private async Task LoadFinishLinesAsync()
@@ -2771,6 +2918,7 @@ namespace PulsarUI.ViewModels
                 // Winner/Lose decision (as opposed to RunResult.FirstFinish below,
                 // which may now be assigned early/tentatively for display purposes).
                 run.FinishEtNs = finishEtNs;
+                RefreshOverUnderLabels();
 
                 try
                 {

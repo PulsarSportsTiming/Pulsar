@@ -9,6 +9,36 @@ namespace PulsarUI.Services
 {
     public static class TimingLabelHelpers
     {
+        // Keep this lane's optional deviation row immediately before Result.
+        public static void UpdateOverUnderLabel(IList<TimingLabelItem> labels, string? handicapIndex, long? finishEtNs)
+        {
+            var row = labels.FirstOrDefault(item => item.Label == "Over/Under");
+            if (!decimal.TryParse(handicapIndex, NumberStyles.Number, CultureInfo.InvariantCulture, out var index) || index == 0m)
+            {
+                if (row != null) labels.Remove(row);
+                return;
+            }
+
+            if (row == null)
+            {
+                var result = labels.FirstOrDefault(item => item.Label == "Result");
+                if (result == null) return;
+                row = new TimingLabelItem { Label = "Over/Under" };
+                labels.Insert(labels.IndexOf(result), row);
+            }
+
+            if (!finishEtNs.HasValue)
+            {
+                row.Value = string.Empty;
+                return;
+            }
+
+            var delta = Math.Round(finishEtNs.Value / 1_000_000_000m - index,
+                AppSettings.TimeResolution, MidpointRounding.AwayFromZero);
+            row.Value = (delta > 0m ? "+" : delta < 0m ? "-" : string.Empty)
+                + Math.Abs(delta).ToString($"F{AppSettings.TimeResolution}", CultureInfo.InvariantCulture);
+        }
+
         // Internal helper for time formatting. includeUnit controls whether to append " s".
         private static string FormatTimeInternal(decimal seconds, bool includeUnit)
         {

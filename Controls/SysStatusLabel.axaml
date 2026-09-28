@@ -5,6 +5,15 @@
         <controls:SysStatusLabel />
     </Design.PreviewWith>
 
+    <Style Selector="controls|SysStatusLabel.SysIdl">
+        <!-- Set Defaults -->
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Label Classes="StandardLabelBold" Background="{DynamicResource SysIdleBackground}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Margin="1" Content="SYSTEM IDLE"/>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+    
     <Style Selector="controls|SysStatusLabel.SysEng">
         <!-- Set Defaults -->
         <Setter Property="Template">

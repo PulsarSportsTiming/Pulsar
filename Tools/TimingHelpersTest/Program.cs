@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System;
 using System.Linq;
 using PulsarUI.Models;
@@ -7,6 +8,7 @@ internal class Program
 {
     private static void Main()
     {
+        TestOverUnderLabels();
         Console.WriteLine($"TimingHelpersTest running on {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
         try { TestPracticeMode(); } catch (Exception ex) { Console.WriteLine("Practice test threw: " + ex); }
         try { TestQeComboDifferentIndexes(); } catch (Exception ex) { Console.WriteLine("QeCombo test threw: " + ex); }
@@ -45,6 +47,54 @@ internal class Program
         try { TestWinnerLose_Breakout_FoulBeatsBreakout(); } catch (Exception ex) { Console.WriteLine("WinnerLose Breakout FoulBeatsBreakout test threw: " + ex); }
         try { TestWinnerLose_Breakout_ByeRun_StillGetsRemarkAndWin(); } catch (Exception ex) { Console.WriteLine("WinnerLose Breakout ByeRun test threw: " + ex); }
         Console.WriteLine("All tests run.");
+    }
+
+    private static void TestOverUnderLabels()
+    {
+        void Configure(int precision) => AppSettings.Initialize(new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
+            { ["Resolution:Time"] = precision.ToString() }).Build());
+        void Assert(bool condition, string message)
+        {
+            if (!condition) throw new Exception("Over/Under: " + message);
+        }
+        var left = new System.Collections.Generic.List<TimingLabelItem>
+        {
+            new() { Label = "Finish ET" }, new() { Label = "Finish mph" },
+            new() { Label = "Result" }, new() { Label = "Remarks" }
+        };
+        var right = new System.Collections.Generic.List<TimingLabelItem> { new() { Label = "Result" } };
+        try
+        {
+            Configure(4);
+            foreach (var index in new string?[] { null, "", "invalid", "0", "00.00" })
+            {
+                TimingLabelHelpers.UpdateOverUnderLabel(left, index, 9_499_900_000);
+                Assert(left.Count == 4, "ineligible index must hide row");
+            }
+            TimingLabelHelpers.UpdateOverUnderLabel(left, "9.50", null);
+            Assert(left[2].Label == "Over/Under" && left[2].Value == "", "blank row before Result until finish");
+            Assert(right.Count == 1, "other lane remains independent");
+            foreach (var (et, expected) in new (long, string)[]
+            {
+                (9_499_900_000, "-0.0001"), (9_500_100_000, "+0.0001"),
+                (9_500_000_000, "0.0000"), (9_499_999_999, "0.0000"),
+                (9_500_050_000, "+0.0001"), (9_499_950_000, "-0.0001")
+            })
+            {
+                TimingLabelHelpers.UpdateOverUnderLabel(left, "9.50", et);
+                Assert(left.Count == 5 && left[2].Value == expected, "value " + expected);
+            }
+            Configure(3);
+            TimingLabelHelpers.UpdateOverUnderLabel(left, "9.50", 9_501_000_000);
+            Assert(left[2].Value == "+0.001", "configured precision");
+            TimingLabelHelpers.UpdateOverUnderLabel(left, "10.00", null);
+            Assert(left[2].Value == "", "new run clears value");
+            TimingLabelHelpers.UpdateOverUnderLabel(left, "", null);
+            Assert(left.Count == 4 && left[2].Label == "Result" && left[3].Label == "Remarks", "clear removes row");
+            Console.WriteLine("Over/Under checks passed.");
+        }
+        finally { Configure(4); }
     }
 
     private static void TestPracticeMode()

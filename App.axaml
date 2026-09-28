@@ -46,6 +46,7 @@
         <SolidColorBrush x:Key="DimLabelColour" Color="#909090"/>
         <SolidColorBrush x:Key="TitleBackground" Color="#3B3B3B"/>
         <SolidColorBrush x:Key="DetailBackground" Color="#303030"/>
+        <SolidColorBrush x:Key="SysIdleBackground" Color="#696969"/>
         <SolidColorBrush x:Key="SysEngagedBackground" Color="#0000FF"/>
         <SolidColorBrush x:Key="RunActiveBackground" Color="#009900"/>
         <SolidColorBrush x:Key="ErrorColour" Color="#FF0000"/>

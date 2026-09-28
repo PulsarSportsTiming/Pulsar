@@ -40,6 +40,8 @@ namespace PulsarUI.Views
             InitializeComponent();
             DataContext = _viewModel;
 
+            this.AddHandler(KeyDownEvent, OnSetupComboKeyDown, RoutingStrategies.Tunnel);
+
             // Register global key handlers so plus/minus work regardless of focus
             this.AddHandler(KeyDownEvent, OnWindowKeyDown, handledEventsToo: true);
             // Fallback: also subscribe to KeyDown event
@@ -129,6 +131,8 @@ namespace PulsarUI.Views
             _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
             InitializeComponent();
             DataContext = _viewModel;
+
+            this.AddHandler(KeyDownEvent, OnSetupComboKeyDown, RoutingStrategies.Tunnel);
 
             // Register global key handlers so plus/minus work regardless of focus
             this.AddHandler(KeyDownEvent, OnWindowKeyDown, handledEventsToo: true);
@@ -298,6 +302,35 @@ namespace PulsarUI.Views
                 }
             }
             catch (Exception ex) { Console.Error.WriteLine("TrySelectCategoryFromTyped error: " + ex.Message); }
+        }
+
+        private void OnSetupComboKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyModifiers != KeyModifiers.Alt) return;
+
+            ComboBox? combo = e.Key switch
+            {
+                Key.L => LeftTreeComboBox,
+                Key.R => RightTreeComboBox,
+                Key.F => FinishLineComboBox,
+                _ => null
+            };
+
+            if (combo == null) return;
+
+            // Consume before focused text fields can interpret the shortcut as input,
+            // even when the corresponding selection is currently locked.
+            e.Handled = true;
+
+            if (_viewModel == null || !_viewModel.SetupActive || !_viewModel.CanEditPair ||
+                CategoryPopup?.IsOpen == true ||
+                !combo.IsEffectivelyEnabled || !combo.IsEffectivelyVisible)
+                return;
+
+            int count = combo.Items.Count;
+            if (count == 0) return;
+
+            combo.SelectedIndex = (combo.SelectedIndex + 1) % count;
         }
 
         private void OnWindowKeyDown(object? sender, KeyEventArgs e)
