@@ -2240,6 +2240,9 @@ namespace PulsarUI.ViewModels
                 // null for an aborted run) against the run_pair row created when the run went active.
                 PersistRunPairCompletion(pair);
 
+                // Publish partial timing data before disengagement clears the pair.
+                PublishRunCompletion();
+
                 // Release the system; the displayed pair remains available for re-run.
                 RunActive = false;
                 SystemEngaged = false;
@@ -3070,92 +3073,7 @@ namespace PulsarUI.ViewModels
                     }
 
                     // Build and publish timingdata/complete payload
-                    try
-                    {
-                        var pair = EngagedPairModel;
-                        // Diagnostic log before attempting to build/publish
-                        LocalLog($"MaybeCheckAndCompleteRun: preparing timingdata/complete publish. pairPresent={(pair!=null)} runsCount={(pair?.Runs?.Length.ToString() ?? "null")} mqttServicePresent={(_mqttService!=null)} RunStartNs={RunStartTimestampNanoseconds}");
-                        if (pair != null && pair.Runs != null && _mqttService != null)
-                        {
-                            // Timestamp: use RunStartTimestampNanoseconds (ns) -> milliseconds
-                            long ms = RunStartTimestampNanoseconds / 1_000_000L;
-                            var isoTs = DateTimeOffset.FromUnixTimeMilliseconds(ms).ToUniversalTime().ToString("o");
-
-                            var categoryId = pair.Category?.Id ?? EngagePairQueueCategory?.Category ?? 0;
-                            var roundMode = pair.RunMode?.ToString() ?? EngagePairQueueCategory?.Mode.ToString() ?? string.Empty;
-                            var roundNumber = EngagePairQueueCategory?.Round ?? 0;
-
-                            var runsList = pair.Runs.Select((r, idx) =>
-                            {
-                                var laneLetter = idx == 0 ? "L" : "R";
-                                var raceNumber = r?.Entry?.RaceNumber ?? string.Empty;
-                                var indexStr = r?.Entry?.HandicapIndex ?? string.Empty;
-                                // Reaction time: delta = ValueNs - ExpectedReactionTimeNs -> seconds
-                                decimal reaction = 0m;
-                                if (r?.ReactionTime != null)
-                                {
-                                    try
-                                    {
-                                        var deltaNs = r.ReactionTime.ValueNs - r.ReactionTime.ExpectedReactionTimeNs;
-                                        reaction = decimal.Round(deltaNs / 1_000_000_000m, 4);
-                                    }
-                                    catch { reaction = 0m; }
-                                }
-
-                                var incTimes = (r?.IncrementalTimes ?? System.Array.Empty<IncrementalTime>())
-                                    .Where(it => it?.Input != null)
-                                    .Select(it => new
-                                    {
-                                        distanceMm = it.Input!.DistanceMm,
-                                        time = decimal.Round(it.ValueNs / 1_000_000_000m, 4)
-                                    }).ToArray();
-
-                                var incSpeeds = (r?.IncrementalSpeeds ?? System.Array.Empty<IncrementalSpeed>())
-                                    .Where(sp => sp?.Input != null)
-                                    .Select(sp => new
-                                    {
-                                        distanceMm = sp.Input!.DistanceMm,
-                                        speed = decimal.Round(sp.MetersPerSecond, 3)
-                                    }).ToArray();
-
-                                return new
-                                {
-                                    lane = laneLetter,
-                                    raceNumber,
-                                    index = indexStr,
-                                    deepStage = false,
-                                    reaction,
-                                    incrementalTimes = incTimes,
-                                    incrementalSpeeds = incSpeeds
-                                };
-                            }).ToArray();
-
-                            var completePayload = new
-                            {
-                                pairId = pair.Id,
-                                timestamp = isoTs,
-                                category = categoryId,
-                                roundMode = roundMode,
-                                roundNumber = roundNumber,
-                                runs = runsList
-                            };
-
-                            var serOptions = new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
-                            var payloadJson = System.Text.Json.JsonSerializer.Serialize(completePayload, serOptions);
-                            LocalLog("MaybeCheckAndCompleteRun: invoking _mqttService.PublishMqtt for timingdata/complete");
-                            _ = _mqttService.PublishMqtt("timingdata/complete", payloadJson);
-                            LocalLog("MaybeCheckAndCompleteRun: PublishMqtt invoked for timingdata/complete");
-                            MaybeDebug("Published timingdata/complete payload: " + payloadJson);
-                        }
-                        else
-                        {
-                            LocalLog("MaybeCheckAndCompleteRun: skipped publish because preconditions not met (pair or mqtt service missing)");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        LocalLog("MaybeCheckAndCompleteRun: failed to publish timingdata/complete: " + ex.Message);
-                    }
+                    PublishRunCompletion();
                     
                     // Ensure the system is no longer engaged when the run/pair completes
                     SystemEngaged = false;
@@ -3166,6 +3084,96 @@ namespace PulsarUI.ViewModels
             catch (Exception ex)
             {
                 LocalLog("MaybeCheckAndCompleteRun error: " + ex.Message);
+            }
+        }
+
+        private void PublishRunCompletion()
+        {
+            try
+            {
+                var pair = EngagedPairModel;
+                // Diagnostic log before attempting to build/publish
+                LocalLog($"MaybeCheckAndCompleteRun: preparing timingdata/complete publish. pairPresent={(pair!=null)} runsCount={(pair?.Runs?.Length.ToString() ?? "null")} mqttServicePresent={(_mqttService!=null)} RunStartNs={RunStartTimestampNanoseconds}");
+                if (pair != null && pair.Runs != null && _mqttService != null)
+                {
+                    // Timestamp: use RunStartTimestampNanoseconds (ns) -> milliseconds
+                    long ms = RunStartTimestampNanoseconds / 1_000_000L;
+                    var isoTs = DateTimeOffset.FromUnixTimeMilliseconds(ms).ToUniversalTime().ToString("o");
+
+                    var categoryId = pair.Category?.Id ?? EngagePairQueueCategory?.Category ?? 0;
+                    var roundMode = pair.RunMode?.ToString() ?? EngagePairQueueCategory?.Mode.ToString() ?? string.Empty;
+                    var roundNumber = EngagePairQueueCategory?.Round ?? 0;
+
+                    var runsList = pair.Runs.Select((r, idx) =>
+                    {
+                        var laneLetter = idx == 0 ? "L" : "R";
+                        var raceNumber = r?.Entry?.RaceNumber ?? string.Empty;
+                        var indexStr = r?.Entry?.HandicapIndex ?? string.Empty;
+                        // Reaction time: delta = ValueNs - ExpectedReactionTimeNs -> seconds
+                        decimal reaction = 0m;
+                        if (r?.ReactionTime != null)
+                        {
+                            try
+                            {
+                                var deltaNs = r.ReactionTime.ValueNs - r.ReactionTime.ExpectedReactionTimeNs;
+                                reaction = decimal.Round(deltaNs / 1_000_000_000m, 4);
+                            }
+                            catch { reaction = 0m; }
+                        }
+
+                        var incTimes = (r?.IncrementalTimes ?? System.Array.Empty<IncrementalTime>())
+                            .Where(it => it?.Input != null)
+                            .Select(it => new
+                            {
+                                distanceMm = it.Input!.DistanceMm,
+                                time = decimal.Round(it.ValueNs / 1_000_000_000m, 4)
+                            }).ToArray();
+
+                        var incSpeeds = (r?.IncrementalSpeeds ?? System.Array.Empty<IncrementalSpeed>())
+                            .Where(sp => sp?.Input != null)
+                            .Select(sp => new
+                            {
+                                distanceMm = sp.Input!.DistanceMm,
+                                speed = decimal.Round(sp.MetersPerSecond, 3)
+                            }).ToArray();
+
+                        return new
+                        {
+                            lane = laneLetter,
+                            raceNumber,
+                            index = indexStr,
+                            deepStage = false,
+                            reaction,
+                            incrementalTimes = incTimes,
+                            incrementalSpeeds = incSpeeds
+                        };
+                    }).ToArray();
+
+                    var completePayload = new
+                    {
+                        pairId = pair.Id,
+                        timestamp = isoTs,
+                        category = categoryId,
+                        roundMode = roundMode,
+                        roundNumber = roundNumber,
+                        runs = runsList
+                    };
+
+                    var serOptions = new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
+                    var payloadJson = System.Text.Json.JsonSerializer.Serialize(completePayload, serOptions);
+                    LocalLog("MaybeCheckAndCompleteRun: invoking _mqttService.PublishMqtt for timingdata/complete");
+                    _ = _mqttService.PublishMqtt("timingdata/complete", payloadJson);
+                    LocalLog("MaybeCheckAndCompleteRun: PublishMqtt invoked for timingdata/complete");
+                    MaybeDebug("Published timingdata/complete payload: " + payloadJson);
+                }
+                else
+                {
+                    LocalLog("MaybeCheckAndCompleteRun: skipped publish because preconditions not met (pair or mqtt service missing)");
+                }
+            }
+            catch (Exception ex)
+            {
+                LocalLog("MaybeCheckAndCompleteRun: failed to publish timingdata/complete: " + ex.Message);
             }
         }
     }

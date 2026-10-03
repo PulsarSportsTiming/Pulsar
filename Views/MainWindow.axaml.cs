@@ -39,6 +39,7 @@ namespace PulsarUI.Views
             _viewModel = new MainWindowViewModel();
             InitializeComponent();
             DataContext = _viewModel;
+            _viewModel.PropertyChanged += OnEngagementStateChanged;
 
             this.AddHandler(KeyDownEvent, OnSetupComboKeyDown, RoutingStrategies.Tunnel);
 
@@ -131,6 +132,7 @@ namespace PulsarUI.Views
             _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
             InitializeComponent();
             DataContext = _viewModel;
+            _viewModel.PropertyChanged += OnEngagementStateChanged;
 
             this.AddHandler(KeyDownEvent, OnSetupComboKeyDown, RoutingStrategies.Tunnel);
 
@@ -645,6 +647,16 @@ namespace PulsarUI.Views
             string frac = match.Groups["frac"].Success ? match.Groups["frac"].Value.PadRight(2, '0') : "00";
 
             return $"{whole}.{frac}";
+        }
+
+        private void OnEngagementStateChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.SystemEngaged) && _viewModel?.SystemEngaged == true)
+            {
+                // Wait for the entry controls to be re-enabled after controller confirmation.
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => LeftRaceNumBox.Focus(),
+                    Avalonia.Threading.DispatcherPriority.Loaded);
+            }
         }
 
         private void EnterPairTextBox_OnGotFocus(object? sender, GotFocusEventArgs e)
